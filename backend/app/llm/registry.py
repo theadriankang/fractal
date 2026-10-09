@@ -32,6 +32,28 @@ class ModelEntry:
     provider: str
     model: str  # provider model name used in the API call
     hunyuan_model: str | None = None  # model name for the Hunyuan direct route
+    display_name: str = ""  # human-friendly name (e.g. "Claude Haiku")
+    provider_name: str = ""  # human-friendly provider name (e.g. "Anthropic")
+
+
+_PROVIDER_NAMES = {
+    "anthropic": "Anthropic",
+    "openai": "OpenAI",
+    "google": "Google",
+    "xai": "xAI",
+    "tencent": "Tencent Hunyuan",
+    "deepseek": "DeepSeek",
+}
+
+
+def _display_name(entry_id: str) -> str:
+    """Convert 'claude-haiku' → 'Claude Haiku', 'gpt-5-mini' → 'GPT-5 Mini'."""
+    parts = entry_id.split("-")
+    special = {"gpt": "GPT", "ai": "AI", "t1": "T1", "v3": "V3"}
+    result = []
+    for p in parts:
+        result.append(special.get(p, p.capitalize()))
+    return " ".join(result)
 
 
 def _load_catalog() -> list[ModelEntry]:
@@ -39,12 +61,15 @@ def _load_catalog() -> list[ModelEntry]:
         data = yaml.safe_load(f)
     entries: list[ModelEntry] = []
     for m in data.get("models", []):
+        eid = m["id"]
         entries.append(
             ModelEntry(
-                id=m["id"],
+                id=eid,
                 provider=m["provider"],
                 model=m["model"],
                 hunyuan_model=m.get("hunyuan_model"),
+                display_name=_display_name(eid),
+                provider_name=_PROVIDER_NAMES.get(m["provider"], m["provider"]),
             )
         )
     return entries

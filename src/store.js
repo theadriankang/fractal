@@ -67,7 +67,13 @@ function streamResponse(get, chatId, msgId, idx, { prompt, matched, onFinish }) 
   const patch = (fn) =>
     get().patchMessage(chatId, msgId, (m) => ({ ...m, responses: m.responses.map((x, i) => (i === idx ? fn(x) : x)) }))
   const chat = get().chats.find((c) => c.id === chatId)
-  const { modelId } = chat.messages.find((m) => m.id === msgId).responses[idx]
+  const response = chat.messages.find((m) => m.id === msgId).responses[idx]
+  const { modelId, auto } = response
+
+  // Routing metadata so the backend can tell the model why it was chosen.
+  const routing = auto
+    ? { selectedBy: 'auto', category: auto.category, reason: auto.reason }
+    : { selectedBy: 'user' }
 
   if (!isLive(modelId)) {
     return streamText(
@@ -97,7 +103,7 @@ function streamResponse(get, chatId, msgId, idx, { prompt, matched, onFinish }) 
     onFinish?.()
   }
   const abort = streamChat(
-    { model: modelId, messages: historyBefore(chat, msgId, modelId), expertise: matched },
+    { model: modelId, messages: historyBefore(chat, msgId, modelId), expertise: matched, routing },
     {
       // The backend reports the Expertise it actually applied (approved only).
       onMeta: ({ expertise }) => patch((x) => ({ ...x, expertise })),
