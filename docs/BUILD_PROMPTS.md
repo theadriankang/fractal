@@ -15,36 +15,48 @@ Paste these into **CodeBuddy** one at a time, in order. Each has a **✅ Done wh
    - **Tencent Hunyuan** — key from the Tencent Cloud console (ask the hackathon organisers about credits). Hunyuan offers an OpenAI-compatible endpoint — confirm the base URL in Tencent's docs.
    - **Embeddings** (for Expertise search): an OpenAI key for `text-embedding-3-small` (costs cents), *or* tell CodeBuddy in Prompt 3 to use a free local model (`BAAI/bge-small-en-v1.5`).
 3. Install **Python 3.11+** (`brew install python@3.11`) if you don't have it.
-4. Keep `docs/PROJECT_CONTEXT.md` open — every prompt refers to it.
+4. **Supabase (one shared project for the team):**
+   - Put the project in a **shared organisation** (or invite everyone: Organization settings → Team → Invite) so all teammates can deploy and read logs.
+   - Region **Singapore (ap-southeast-1)**.
+   - Database → Extensions → enable **`vector`** (pgvector).
+   - Collect: Project URL, **anon** key (front end), **service_role** key and the **Session pooler connection string** (`DATABASE_URL`, back end only), and the **JWT secret** (Project Settings → API).
+   - Install the CLI once: `npx supabase login` then `npx supabase link --project-ref <your-ref>`.
+5. Keep `docs/PROJECT_CONTEXT.md` open — every prompt refers to it.
 
 ---
 
-## Prompt 1 · Backend skeleton + database
+## Prompt 1 · Backend skeleton on Supabase
 
 ```
-Read docs/PROJECT_CONTEXT.md first, then src/data/expertise.js, src/data/taxonomy.js and src/store.js.
+Read docs/PROJECT_CONTEXT.md first (especially "Architecture"), then src/data/expertise.js, src/data/taxonomy.js, src/store.js and supabase/migrations/.
 
-Create a Python FastAPI backend in /backend:
-- Stack: FastAPI, Uvicorn, SQLModel on SQLite (backend/fractal.db), pydantic-settings for config from backend/.env.
-- Files: backend/app/main.py, config.py, db.py, models.py, schemas.py, routers/ (chats.py, expertise.py, proposals.py, health.py), seed.py; backend/requirements.txt; backend/.env.example; backend/README.md.
-- Tables (SQLModel): User(id, name, role: contributor|reviewer), Chat(id, title, folder, pinned, created_at, updated_at),
-  Message(id, chat_id, role, content, files JSON, attached_expertise JSON, web_search, created_at),
-  Response(id, message_id, model_id, auto JSON, expertise_used JSON [{id,version}], content, rating, created_at),
-  Expertise (all fields from the Expertise object in PROJECT_CONTEXT.md; list fields as JSON columns),
-  ExpertiseVersion(id, expertise_id, version, date, author, approved_by, note, snapshot JSON),
-  Proposal(id, expertise_id, type, created_at, author, reason, changes JSON, chat_id, status: open|approved|rejected),
-  Feedback(id, expertise_id, response_id, user, rating, comment, date),
-  AuditLog(id, at, actor, actor_role, action, target_type, target_id, detail JSON).
-- seed.py: export the seed data from src/data/expertise.js and src/data/chats.js into backend/seed_data.json (write a small Node script scripts/export-seed.mjs that imports those modules and writes JSON), then load it into SQLite. Seed two users: "Adrian Kang" (reviewer) and "Priya S" (contributor).
-- REST endpoints (JSON, camelCase field names exactly matching the front-end shapes):
+A. Database (Supabase Postgres) — create supabase/migrations/<timestamp>_core_schema.sql:
+- profiles(id uuid PK references auth.users, name text, role text check in ('contributor','reviewer') default 'contributor', created_at)
+- chats(id, user_id → auth.users, title, folder, pinned bool, created_at, updated_at)
+- messages(id, chat_id → chats on delete cascade, role, content, files jsonb, attached_expertise jsonb, web_search bool, detection jsonb, detection_state text, created_at)
+- responses(id, message_id → messages on delete cascade, model_id, auto jsonb, expertise_used jsonb, content, rating text, created_at)
+- expertise (every field of the Expertise object in PROJECT_CONTEXT.md; list fields as jsonb; status check constraint; origin text)
+- expertise_versions(id, expertise_id, version, date, author, approved_by, note, snapshot jsonb)
+- proposals(id, expertise_id, type, created_at, author, reason, changes jsonb, chat_id, status check in ('open','approved','rejected'))
+- feedback(id, expertise_id, response_id, user_name, rating, comment, date)
+- audit_log(id bigserial, at timestamptz default now(), actor uuid, actor_role, action, target_type, target_id, detail jsonb)
+- Enable RLS on all tables. Policies: authenticated users can SELECT expertise/expertise_versions/feedback/proposals; users can SELECT/INSERT/UPDATE/DELETE only their own chats/messages/responses; all writes to expertise, versions, proposals and audit_log happen through FastAPI (service role), so no INSERT/UPDATE policies for those.
+- Do not modify the existing meetings migration.
+
+B. FastAPI service in /backend:
+- Stack: FastAPI, Uvicorn, SQLModel/SQLAlchemy + psycopg on DATABASE_URL, pydantic-settings reading backend/.env.
+- Files: backend/app/main.py, config.py, db.py, models.py, schemas.py, auth.py (stub for now: read X-User-Id header; Prompt 8 replaces it with Supabase JWT verification), routers/ (chats.py, expertise.py, proposals.py, health.py); backend/requirements.txt; backend/.env.example; backend/README.md.
+- REST endpoints, JSON in camelCase exactly matching the front-end shapes:
   GET/POST /api/chats, GET/PATCH/DELETE /api/chats/{id} (GET returns messages with nested responses),
-  GET /api/expertise, GET /api/expertise/{id} (includes versions + feedback), POST /api/expertise, PATCH /api/expertise/{id},
-  GET /api/proposals, GET /api/taxonomy (mirror src/data/taxonomy.js), GET /api/health.
+  GET /api/expertise, GET /api/expertise/{id} (with versions + feedback), POST /api/expertise, PATCH /api/expertise/{id},
+  GET /api/proposals, GET /api/taxonomy (mirror src/data/taxonomy.js), GET /api/health (also checks the DB connection).
 - CORS for http://localhost:5173. Add a Vite dev proxy in vite.config.js so /api → http://localhost:8000.
-- Do NOT change any front-end UI yet.
-Give me the exact commands to create a venv, install, seed and run.
+
+C. Seed: write scripts/export-seed.mjs (Node) that imports src/data/expertise.js + src/data/chats.js and writes backend/seed_data.json; then backend/seed.py loads it into Supabase (idempotent: upsert by id). Also create two demo users with the Supabase Admin API (service role): adrian@fractal.demo (reviewer) and priya@fractal.demo (contributor), password demo1234, with matching profiles rows.
+
+Do NOT change any front-end UI yet. Give me the exact commands: apply the migration (npx supabase db push), create the venv, install, seed, run.
 ```
-✅ **Done when:** `uvicorn app.main:app --reload` runs, and http://localhost:8000/docs lists the endpoints; `GET /api/expertise` returns 17 Expertise.
+✅ **Done when:** the new tables appear in Supabase → Table Editor, `uvicorn app.main:app --reload` runs, http://localhost:8000/docs lists the endpoints, and `GET /api/expertise` returns **17** Expertise.
 
 ---
 
@@ -70,21 +82,22 @@ Write a tiny CLI test script backend/scripts/try_stream.py that streams one prom
 
 ---
 
-## Prompt 3 · Expertise retrieval with LlamaIndex (the core)
+## Prompt 3 · Expertise retrieval with LlamaIndex + pgvector (the core)
 
 ```
-Read docs/PROJECT_CONTEXT.md. Implement Expertise retrieval and grounding using LlamaIndex.
+Read docs/PROJECT_CONTEXT.md. Implement Expertise retrieval and grounding using LlamaIndex with Supabase pgvector.
 
 1. backend/app/expertise/index.py:
-   - Build a LlamaIndex VectorStoreIndex over APPROVED Expertise only. One Document per Expertise; text = name + summary + whenToUse + knowledge + decisionLogic + keywords; metadata = id, version, domain, topic, assetTypes.
-   - Embeddings: [OpenAI text-embedding-3-small via OPENAI_API_KEY] OR [local BAAI/bge-small-en-v1.5 via llama-index-embeddings-huggingface if EMBEDDINGS=local].
-   - Persist the index to backend/storage/; rebuild on startup if missing, and refresh a single document whenever Expertise is approved, rolled back, edited (when approved), or deprecated (remove it).
-2. match(prompt, attached_ids, top_k=2) → returns attached Expertise (always included if approved) + vector matches above a similarity threshold (start at 0.35, configurable), combined with a keyword boost from the `keywords` field. Return [{id, version, score}].
+   - Use LlamaIndex's Postgres vector store (llama-index-vector-stores-postgres / PGVectorStore) on the same Supabase DATABASE_URL, table expertise_embeddings. (Make sure the `vector` extension is enabled — add it to a migration with `create extension if not exists vector;`.)
+   - Index APPROVED Expertise only. One Document per Expertise; text = name + summary + whenToUse + knowledge + decisionLogic + keywords; metadata = id, version, domain, topic, assetTypes.
+   - Embeddings: [OpenAI text-embedding-3-small via OPENAI_API_KEY] OR [local BAAI/bge-small-en-v1.5 via llama-index-embeddings-huggingface if EMBEDDINGS=local]. Store the embedding dimension in config.
+   - Provide reindex_one(id) (upsert/delete by expertise id) and reindex_all(); call reindex_one whenever Expertise is approved, rolled back, edited while approved, or deprecated (delete). CLI: python -m app.expertise.index --rebuild.
+2. match(prompt, attached_ids, top_k=2) → attached Expertise (always included if approved) + vector matches above a similarity threshold (MATCH_THRESHOLD, default 0.35), with a small keyword boost from `keywords`. Return [{id, version, score}].
 3. POST /api/expertise/match {prompt, attachedIds} for debugging.
-4. In /api/chat/stream: call match() once per user message, put the result in every `meta` event, increment usageCount for each used Expertise, and build the system prompt using EXACTLY the template in docs/BUILD_PROMPTS.md → "Appendix A — Grounded system prompt".
-5. Unit tests (pytest) for: drafts are never matched; attached Expertise is always included; deprecated is removed from the index.
+4. In /api/chat/stream: call match() once per user message, put the result in every `meta` event, increment usage_count for each used Expertise, and build the system prompt using EXACTLY the template in docs/BUILD_PROMPTS.md → "Appendix A — Grounded system prompt".
+5. pytest: drafts are never matched; attached Expertise always included; deprecated removed from the index.
 ```
-✅ **Done when:** asking "CHWST is 8.1°C and level 23 is warm, what do I check?" returns an answer that follows *Chiller Plant Fault Triage* steps and the `meta` event lists `exp-chiller-fault`.
+✅ **Done when:** asking "CHWST is 8.1°C and level 23 is warm, what do I check?" returns an answer that follows *Chiller Plant Fault Triage* and the `meta` event lists `exp-chiller-fault`.
 
 ---
 
@@ -164,15 +177,17 @@ Read docs/PROJECT_CONTEXT.md, src/store.js and src/lib/mockApi.js. Connect the U
 
 ---
 
-## Prompt 8 · Login + roles
+## Prompt 8 · Login + roles with Supabase Auth
 
 ```
-Read docs/PROJECT_CONTEXT.md. Add simple authentication.
-- Backend: POST /api/auth/login {email, password} → JWT (HS256, secret in .env, 12 h expiry); GET /api/auth/me. Seed users: adrian@fractal.demo (reviewer), priya@fractal.demo (contributor), password "demo1234" for both. Replace X-User-Id with the JWT on every endpoint; keep role checks server-side.
-- Front end: a minimal login page in the same visual style (centered card, Fractal logo); store the token; redirect to /login when 401. Replace the "Role (demo)" switcher in the user menu with "Switch user" (logs out → login), and show the real role under the name.
-- Expertise owner on new drafts = the logged-in user.
+Read docs/PROJECT_CONTEXT.md. Replace the X-User-Id stub with Supabase Auth.
+- Front end: a minimal login page in the same visual style (centered card, Fractal logo) using supabase.auth.signInWithPassword from src/lib/supabase.js. Keep the session; redirect to /login when there's no session or the API returns 401. Send the access token as `Authorization: Bearer <jwt>` on every /api call.
+- Load the user's name + role from the `profiles` table and show it in the sidebar user menu. Replace the "Role (demo)" switcher with "Switch user" (sign out → login).
+- FastAPI: backend/app/auth.py verifies the Supabase JWT (JWT secret or the project's JWKS from SUPABASE_URL), reads the user id from `sub`, loads role from profiles. Reviewer-only endpoints return 403 for contributors. The audit log records the real user id.
+- The Meeting Recorder's Edge Function calls should use the logged-in session too (supabase.functions.invoke already sends the JWT once signed in) — store user_id on saved meetings.
+- New Expertise owner = the logged-in user's name.
 ```
-✅ **Done when:** Priya can capture and submit but the Approve button returns 403; Adrian can approve.
+✅ **Done when:** priya@fractal.demo can capture and submit but Approve returns 403; adrian@fractal.demo can approve; the audit log shows the right user.
 
 ---
 
@@ -190,13 +205,14 @@ Read docs/PROJECT_CONTEXT.md. Make the composer's file attach real.
 ## Prompt 10 · Deploy on Tencent Cloud (live URL = bonus points)
 
 ```
-Read docs/PROJECT_CONTEXT.md. Prepare production deployment for a single Tencent Cloud Lighthouse (Ubuntu 22.04) server.
-- Dockerfile for backend (uvicorn, 2 workers), multi-stage Dockerfile for the front end (vite build → nginx).
-- docker-compose.yml: frontend (nginx :80 serving dist, proxying /api to backend with SSE buffering OFF: proxy_buffering off; proxy_read_timeout 300s), backend (:8000, volume for fractal.db + storage/ + uploads/).
-- deploy/README.md: step-by-step for a beginner — create Lighthouse instance, open port 80/443 in the firewall, install Docker, git clone, copy .env, docker compose up -d, optional free HTTPS with Caddy or certbot.
-- A /api/health check used by docker compose.
+Read docs/PROJECT_CONTEXT.md. Prepare production deployment of the front end + FastAPI on one Tencent Cloud Lighthouse (Ubuntu 22.04) server. The database stays on Supabase.
+- Dockerfile for backend (uvicorn, 2 workers); multi-stage Dockerfile for the front end (vite build → nginx). VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are build args.
+- docker-compose.yml: frontend (nginx :80/:443 serving dist, proxying /api to backend with proxy_buffering off and proxy_read_timeout 300s for SSE), backend (:8000, env from backend/.env).
+- HTTPS is REQUIRED (the Meeting Recorder's microphone only works on https): use Caddy with automatic certificates, or certbot. Document getting a free domain/subdomain if needed.
+- deploy/README.md: step-by-step for a beginner — create the Lighthouse instance (Singapore region), open ports 80/443, install Docker, git clone, create .env files, docker compose up -d, add the production URL to Supabase → Authentication → URL Configuration.
+- Health check on /api/health.
 ```
-✅ **Done when:** the site loads on the server's public IP and streaming works.
+✅ **Done when:** the site loads on **https://** at the public address, login works, chat streams, and the Meeting Recorder can use the mic.
 
 ---
 
@@ -204,24 +220,24 @@ Read docs/PROJECT_CONTEXT.md. Prepare production deployment for a single Tencent
 
 ```
 Read docs/PROJECT_CONTEXT.md.
-1. Write docs/ARCHITECTURE.md with a Mermaid diagram: Browser → FastAPI → (Auto router, LiteLLM gateway → Claude/GPT/Gemini/Grok/Hunyuan/DeepSeek, LlamaIndex Expertise index, Extraction worker) → SQLite (+ audit log). Add a second diagram of the Expertise lifecycle: conversation → detection → draft → review → approved vN → applied in chat → feedback → proposal → vN+1 (with rollback).
+1. Write docs/ARCHITECTURE.md with a Mermaid diagram: Browser → FastAPI → (Auto router, LiteLLM gateway → Claude/GPT/Gemini/Grok/Hunyuan/DeepSeek, LlamaIndex Expertise index, Extraction worker) → Supabase Postgres + pgvector (+ audit log); Browser → Supabase Auth and the `meetings` Edge Function. Add a second diagram of the Expertise lifecycle: conversation → detection → draft → review → approved vN → applied in chat → feedback → proposal → vN+1 (with rollback).
 2. Write docs/KEPPEL_MAPPING.md: a table mapping each of Keppel's 8 "Solution Diagram" questions and 11 "Should be" criteria to the exact Fractal feature/screen that answers it.
 3. Add backend/scripts/demo_reset.py that restores the seed state so the live demo always starts clean.
 ```
 
 ---
 
-## Prompt 12 · Meetings → backend + "Extract Expertise from this meeting"
+## Prompt 12 · "Extract Expertise from this meeting"
 
 ```
-Read docs/PROJECT_CONTEXT.md, src/lib/meetingsService.js, src/hooks/useMeetingRecorder.js and src/pages/MeetingRecorder.jsx.
+Read docs/PROJECT_CONTEXT.md, src/lib/meetingsService.js, src/pages/MeetingRecorder.jsx and supabase/functions/meetings/index.ts. Meetings already live in Supabase — keep that; do not move them.
 
-1. Move meetings into the FastAPI backend: table Meeting(id, user_id, title, transcript_text, duration, created_at, updated_at) and endpoints GET/POST /api/meetings, PATCH/DELETE /api/meetings/{id} (owner-only, role-checked like everything else). Rewrite src/lib/meetingsService.js to call these endpoints with the SAME function names and return shapes (createMeeting, updateMeeting, listMeetings, deleteMeeting) so the UI does not change. Keep the localStorage fallback when VITE_USE_MOCK=true. Then remove @supabase/supabase-js, src/lib/supabase.js and supabase/ (and the "Saved to Supabase" label → "Saved").
-2. Add POST /api/meetings/{id}/extract: run the Appendix B extraction prompt over the transcript (chunk into ~3,000-word windows, merge duplicates) and return up to 5 candidate Expertise drafts, each with source {type:'interview', title: meeting title, excerpt, date}.
-3. In MeetingRecorder.jsx, when status is 'done' show a button "Extract Expertise from this meeting" above the chat. Show the candidates as cards (name, domain › topic, 2-3 knowledge bullets) each with "Save as draft" / "Dismiss". Saved drafts go to the Review Queue with origin 'auto-detected' and the meeting as the source.
-4. Swap the browser speech API for server-side transcription later: leave a TODO and a config flag TRANSCRIBE=browser|tencent-asr|whisper; implement only 'browser' now.
+1. FastAPI: POST /api/meetings/{id}/extract — read the meeting row from Supabase (cleaned_transcript, falling back to raw_transcript, plus summary/key_takeaways), run the Appendix B extraction prompt over it (chunk into ~3,000-word windows, merge duplicates against each other and against existing approved Expertise), and return up to 5 candidate Expertise drafts, each with source {type:'interview', title: meeting title, excerpt, date}.
+2. POST /api/meetings/{id}/extract/accept {candidate} → creates a draft Expertise (origin 'auto-detected', source = the meeting) and writes an audit log row.
+3. MeetingRecorder.jsx: after a meeting is saved (step 4 "Approve & save"), show "Extract Expertise from this meeting". Show candidates as cards (name, domain › topic, 2–3 knowledge bullets) with "Save as draft" / "Dismiss". Saved drafts appear in the Review Queue.
+4. Leave transcription as-is (browser Web Speech API) but add a config flag TRANSCRIBE=browser|tencent-asr|whisper with a TODO — only 'browser' implemented.
 ```
-✅ **Done when:** recording an expert explaining a procedure produces at least one draft Expertise in the Review Queue whose Sources section shows the meeting as an *interview*.
+✅ **Done when:** recording an expert explaining a procedure → Approve & save → Extract produces at least one draft Expertise in the Review Queue whose Sources section shows the meeting as an *interview*.
 
 ---
 
@@ -315,22 +331,44 @@ Return ONLY JSON matching:
 Only return kind "new" or "revision" when confidence >= 0.6.
 ```
 
-## Appendix C — `.env.example` (backend)
+## Appendix C — environment files
 
+`backend/.env` (server only — never commit):
 ```
+# Supabase
+SUPABASE_URL=https://<ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=        # server only, never VITE_
+SUPABASE_JWT_SECRET=              # Project Settings → API
+DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
+
+# Models (fill what you have)
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+XAI_API_KEY=
+DEEPSEEK_API_KEY=
 OPENROUTER_API_KEY=
 HUNYUAN_API_KEY=
-HUNYUAN_BASE_URL=            # Tencent Hunyuan OpenAI-compatible endpoint — check Tencent docs
-OPENAI_API_KEY=              # embeddings (or set EMBEDDINGS=local)
-EMBEDDINGS=openai            # openai | local
-EXTRACTION_MODEL=gpt-5-mini
-ROUTER_MODEL=gemini-flash
+HUNYUAN_BASE_URL=                 # Tencent Hunyuan OpenAI-compatible endpoint — check Tencent docs
+
+EXTRACTION_MODEL=claude-haiku
+ROUTER_MODEL=claude-haiku
+EMBEDDINGS=local                  # local | openai
 MATCH_THRESHOLD=0.35
-JWT_SECRET=change-me
 ```
+
+Root `.env` (front end — only public values, `VITE_` prefix):
+```
+VITE_SUPABASE_URL=https://<ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=
+VITE_USE_MOCK=false
+```
+
+Supabase Edge Function secrets (Dashboard → Edge Functions → Secrets): `ANTHROPIC_API_KEY`, optional `CLAUDE_MODEL`.
 
 ## If something goes wrong
 - **CodeBuddy changed the UI look** → "Revert visual changes; follow rule 1 in docs/PROJECT_CONTEXT.md."
 - **Streaming arrives all at once** → it's buffering: check `proxy_buffering off` (nginx) and that the endpoint returns `text/event-stream`.
+- **"Failed to send a request to the Edge Function"** → the function is redeploying, crashed on boot, or isn't deployed: check Supabase → Edge Functions → meetings → Logs.
 - **Model 404 / not found** → fix the model string in `backend/models.yaml` (provider names change often).
 - **Demo day panic** → set `VITE_USE_MOCK=true` and rebuild: the full UI works offline with mock data.

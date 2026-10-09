@@ -29,11 +29,25 @@ Version-controlled (rollback) · Secure (role-based access) · Clearly bounded (
   src/pages/MeetingRecorder.jsx + src/hooks/useMeetingRecorder.js, useSpeechRecognition.js, useMicAnalyser.js
                       Meeting Recorder (live transcript via browser Web Speech API, inline editing, recent meetings)
   src/lib/meetingsService.js, src/lib/supabase.js
-                      Meetings persistence: Supabase if VITE_SUPABASE_* set, else localStorage (temporary — see Prompt 12)
-  supabase/migrations/  SQL for the meetings table (Supabase, temporary)
-/backend              Python FastAPI service (TO BUILD)
+                      Meetings: browser → Supabase Edge Function `meetings` (Claude insights + save)
+  supabase/migrations/  ALL database schema (SQL). Every schema change = a new timestamped .sql file here
+  supabase/functions/   Supabase Edge Functions (TypeScript/Deno) — currently `meetings`
+/backend              Python FastAPI "AI service" (TO BUILD): LiteLLM, LlamaIndex, routing, extraction, governance
 /docs                 This file + build prompts
 ```
+
+## Architecture (decided)
+```
+Browser (React)
+  ├── Supabase Auth  (login; JWT carries the user id)
+  ├── Supabase       (simple reads that Row Level Security allows, e.g. listing Expertise)
+  ├── Edge Function `meetings`  (Meeting Recorder insights + save — already built)
+  └── FastAPI on Tencent Cloud  (/api/*: chat streaming, Auto routing, Expertise retrieval,
+                                 extraction, review/approve/rollback, audit) ──► Supabase Postgres (+ pgvector)
+```
+- **Supabase is the only database** (Postgres + pgvector + Auth + Edge Functions). No SQLite.
+- FastAPI talks to Supabase Postgres with `DATABASE_URL` and verifies the user's **Supabase JWT** on every request.
+- Use the Supabase project in the **Singapore (ap-southeast-1)** region, owned by a shared team organisation.
 
 ## Expertise object (source of truth: src/data/expertise.js)
 ```
@@ -53,12 +67,13 @@ Assistant msg: `{id, role:'assistant', createdAt, responses:[{modelId, auto:{cat
 
 ## Rules for the coding assistant
 1. **Do not redesign the UI.** Keep components, styling and the data shapes above. Change the front end only where a prompt says so.
-2. Backend: **Python 3.11+, FastAPI, SQLModel (SQLite file `backend/fractal.db`), LiteLLM for all model calls, LlamaIndex for Expertise retrieval.**
-3. All secrets in `backend/.env` (never committed). Provide `backend/.env.example`.
+2. Backend: **Python 3.11+, FastAPI, SQLModel/SQLAlchemy on Supabase Postgres (`DATABASE_URL`), LiteLLM for all model calls, LlamaIndex for Expertise retrieval with pgvector.** Do NOT use SQLite.
+3. Secrets: `backend/.env` (server) and root `.env` (front end, `VITE_*` only). Never committed. **`SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` and model API keys must NEVER have a `VITE_` prefix or appear in front-end code.** Provide `.env.example` files with empty values.
+3b. **Database schema lives only in `supabase/migrations/*.sql`** (applied with `npx supabase db push`). Enable Row Level Security on every table. Use snake_case columns in SQL; the API returns camelCase matching the front-end shapes.
 4. **Only `approved` Expertise may ever be injected into a model prompt.** Drafts/in-review never.
 5. Every approve / reject / rollback / deprecate / proposal decision writes an **audit log** row.
 6. Role checks happen **on the server**: only `reviewer` can approve, reject, roll back, deprecate.
 7. Keep a **mock fallback**: front end must still run with `VITE_USE_MOCK=true` (demo safety if APIs fail on stage).
 8. Small commits with clear messages after each prompt.
-9. **Do not touch the Meeting Recorder or Supabase files** until Prompt 12. The main backend is FastAPI + SQLite; meetings move into it in Prompt 12.
+9. **Do not rewrite the Meeting Recorder** (its page, hooks, `meetingsService.js` or the `meetings` Edge Function) unless a prompt says so. It already uses Supabase — integrate with it, don't replace it.
 10. Work on a branch per prompt (e.g. `backend/prompt-1`), open a pull request, merge into `main` when the ✅ check passes.
