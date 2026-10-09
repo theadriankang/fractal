@@ -120,6 +120,149 @@ export async function uploadFile(file) {
 const EXPERTISE_FIELDS = ['id', 'name', 'version', 'status', 'owner', 'whenToUse', 'knowledge', 'decisionLogic', 'guardrails', 'escalation']
 const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, e[f]]))
 
+// ===========================================================================
+// Shared fetch helper — parses 400/403 messages so the UI can show them.
+// Throws an Error with the server's detail string (or a fallback).
+// ===========================================================================
+
+async function _apiFetch(path, { method = 'GET', body, headers } = {}) {
+  const opts = { method, headers: _authHeaders(headers || {}) }
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json'
+    opts.body = JSON.stringify(body)
+  }
+  let res
+  try {
+    res = await fetch(path, opts)
+  } catch {
+    throw new ApiError('Backend offline: switch VITE_USE_MOCK=true for demo mode', 0)
+  }
+  if (res.status === 204) return null
+  const data = await res.json().catch(() => null)
+  if (!res.ok) {
+    const detail = typeof data?.detail === 'string'
+      ? data.detail
+      : Array.isArray(data?.detail) && data.detail.length
+        ? data.detail.map((d) => d?.msg || JSON.stringify(d)).join('; ')
+        : `Backend error (${res.status})`
+    throw new ApiError(detail, res.status)
+  }
+  return data
+}
+
+/** Error class carrying the HTTP status + server message. */
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+/** True when the error is a network failure (backend unreachable). */
+export function isOffline(err) {
+  return err instanceof ApiError && err.status === 0
+}
+
+// ===========================================================================
+// Expertise API
+// ===========================================================================
+
+/** GET /api/expertise → list (without versions/feedback). */
+export function listExpertise() { return _apiFetch('/api/expertise') }
+
+/** GET /api/expertise/:id → single (with versions + feedback). */
+export function getExpertise(id) { return _apiFetch(`/api/expertise/${id}`) }
+
+/** POST /api/expertise → create. */
+export function createExpertiseApi(body) { return _apiFetch('/api/expertise', { method: 'POST', body }) }
+
+/** PATCH /api/expertise/:id → update (metadata direct; content changes → proposal). */
+export function patchExpertiseApi(id, body) { return _apiFetch(`/api/expertise/${id}`, { method: 'PATCH', body }) }
+
+/** POST /api/expertise/:id/submit → in_review. */
+export function submitExpertiseApi(id) { return _apiFetch(`/api/expertise/${id}/submit`, { method: 'POST', body: {} }) }
+
+/** POST /api/expertise/:id/approve → approved (bumps version). */
+export function approveExpertiseApi(id, note = 'Approved') { return _apiFetch(`/api/expertise/${id}/approve`, { method: 'POST', body: { note } }) }
+
+/** POST /api/expertise/:id/reject → draft. */
+export function rejectExpertiseApi(id, reason = '') { return _apiFetch(`/api/expertise/${id}/reject`, { method: 'POST', body: { reason } }) }
+
+/** POST /api/expertise/:id/deprecate → deprecated. */
+export function deprecateExpertiseApi(id) { return _apiFetch(`/api/expertise/${id}/deprecate`, { method: 'POST', body: {} }) }
+
+/** POST /api/expertise/:id/restore → approved. */
+export function restoreExpertiseApi(id) { return _apiFetch(`/api/expertise/${id}/restore`, { method: 'POST', body: {} }) }
+
+/** POST /api/expertise/:id/rollback → approved at snapshot version. */
+export function rollbackExpertiseApi(id, version) { return _apiFetch(`/api/expertise/${id}/rollback`, { method: 'POST', body: { version } }) }
+
+/** POST /api/expertise/:id/feedback → updated expertise (down+comment auto-creates a proposal). */
+export function postFeedbackApi(id, { rating, comment = '', chatId = null }) {
+  return _apiFetch(`/api/expertise/${id}/feedback`, { method: 'POST', body: { rating, comment, chatId } })
+}
+
+// ===========================================================================
+// Proposals API
+// ===========================================================================
+
+/** GET /api/proposals?status=open → list. */
+export function listProposals(status = null) {
+  const q = status ? `?status=${encodeURIComponent(status)}` : ''
+  return _apiFetch(`/api/proposals${q}`)
+}
+
+/** POST /api/proposals → create. */
+export function createProposalApi({ expertiseId, reason, changes, chatId = null }) {
+  return _apiFetch('/api/proposals', { method: 'POST', body: { expertiseId, reason, changes, chatId } })
+}
+
+/** POST /api/proposals/:id/approve → merges into expertise, bumps version. */
+export function approveProposalApi(id, note = 'Approved') { return _apiFetch(`/api/proposals/${id}/approve`, { method: 'POST', body: { note } }) }
+
+/** POST /api/proposals/:id/reject. */
+export function rejectProposalApi(id, reason = '') { return _apiFetch(`/api/proposals/${id}/reject`, { method: 'POST', body: { reason } }) }
+
+// ===========================================================================
+// Audit API
+// ===========================================================================
+
+/** GET /api/audit?targetId=&actor=&limit= → list (reviewer only). */
+export function listAudit({ targetId, actor, limit = 100 } = {}) {
+  const params = new URLSearchParams()
+  if (targetId) params.set('targetId', targetId)
+  if (actor) params.set('actor', actor)
+  params.set('limit', String(limit))
+  return _apiFetch(`/api/audit?${params}`)
+}
+
+// ===========================================================================
+// Taxonomy API
+// ===========================================================================
+
+/** GET /api/taxonomy → { taxonomy, assetTypes }. */
+export function getTaxonomyApi() { return _apiFetch('/api/taxonomy') }
+
+// ===========================================================================
+// Chats API
+// ===========================================================================
+
+/** GET /api/chats → list of chats with messages for the current user. */
+export function listChatsApi() { return _apiFetch('/api/chats') }
+
+/** POST /api/chats → create. */
+export function createChatApi(body) { return _apiFetch('/api/chats', { method: 'POST', body }) }
+
+/** GET /api/chats/:id → single chat with messages. */
+export function getChatApi(id) { return _apiFetch(`/api/chats/${id}`) }
+
+/** PATCH /api/chats/:id → update title/folder/pinned. */
+export function patchChatApi(id, body) { return _apiFetch(`/api/chats/${id}`, { method: 'PATCH', body }) }
+
+/** DELETE /api/chats/:id → 204. */
+export function deleteChatApi(id) { return _apiFetch(`/api/chats/${id}`, { method: 'DELETE' }) }
+
 /**
  * Streams one model's answer from POST /api/chat/stream (Server-Sent Events).
  * handlers: onMeta({expertise}), onDelta(text), onDone({stopReason, model}), onError(message).
