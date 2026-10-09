@@ -6,6 +6,7 @@ from sqlalchemy import (
     String, Text, Boolean, Integer, BigInteger, Float, DateTime,
     ForeignKey, JSON,
 )
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -21,7 +22,7 @@ def _uuid_str():
 
 class Profile(Base):
     __tablename__ = "profiles"
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(PgUUID(as_uuid=False), primary_key=True)
     name: Mapped[str] = mapped_column(Text, default="")
     role: Mapped[str] = mapped_column(String, default="contributor")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -32,7 +33,7 @@ class Chat(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid_str)
     # FK to auth.users is defined in SQL only — SQLAlchemy can't resolve
     # the auth schema, so no ForeignKey() here.
-    user_id: Mapped[str] = mapped_column(String)
+    user_id: Mapped[str] = mapped_column(PgUUID(as_uuid=False))
     title: Mapped[str] = mapped_column(Text, default="New Chat")
     folder: Mapped[str | None] = mapped_column(Text, nullable=True)
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)

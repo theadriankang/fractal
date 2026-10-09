@@ -69,20 +69,39 @@ def get_supabase_client():
         return None
 
 
+def _find_user_by_email(sb, email: str):
+    """Page through all users to find one by email."""
+    page = 1
+    per_page = 1000
+    while True:
+        try:
+            resp = sb.auth.admin.list_users(page=page, per_page=per_page)
+        except Exception:
+            break
+        # The supabase-py version may return a list directly or an object
+        # with a .users attribute.
+        if isinstance(resp, list):
+            users = resp
+        else:
+            users = getattr(resp, "users", []) or []
+        if not users:
+            break
+        for u in users:
+            if getattr(u, "email", None) == email:
+                return u
+        if len(users) < per_page:
+            break
+        page += 1
+    return None
+
+
 def upsert_user(sb, email: str, password: str, name: str, role: str) -> str | None:
     """Create or update a demo user via Supabase Admin API. Returns user id."""
     if not sb:
         print(f"  [skip] No Supabase client — cannot create {email}")
         return None
 
-    # Try to list existing users and find by email
-    try:
-        resp = sb.auth.admin.list_users()
-        users = resp.users if hasattr(resp, "users") else []
-    except Exception:
-        users = []
-
-    existing = next((u for u in users if getattr(u, "email", None) == email), None)
+    existing = _find_user_by_email(sb, email)
 
     if existing:
         uid = existing.id
@@ -99,8 +118,15 @@ def upsert_user(sb, email: str, password: str, name: str, role: str) -> str | No
             uid = res.user.id
             print(f"  [created] {email} → {uid}")
         except Exception as e:
-            print(f"  [error] Could not create {email}: {e}")
-            return None
+            # User might have been created between the check and the create;
+            # do one more lookup.
+            existing = _find_user_by_email(sb, email)
+            if existing:
+                uid = existing.id
+                print(f"  [exists] {email} → {uid}")
+            else:
+                print(f"  [error] Could not create {email}: {e}")
+                return None
 
     # Upsert profile
     db = SessionLocal()
