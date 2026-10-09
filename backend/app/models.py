@@ -155,6 +155,9 @@ class Feedback(Base):
     rating: Mapped[str] = mapped_column(String, nullable=False)
     comment: Mapped[str] = mapped_column(Text, default="")
     chat_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # demo account id until Supabase Auth
+    response_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[str | None] = mapped_column(Text, nullable=True)
     date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

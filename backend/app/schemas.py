@@ -235,7 +235,10 @@ class RatingIn(CamelModel):
     chat_id: Optional[str] = None
     # Client-generated id for the 👎 correction proposal, so the optimistic copy and the saved row match.
     proposal_id: Optional[str] = None
+    # The rater's account id and the answer's key (src/lib/ratings.js responseKey): one rating per
+    # person per answer, so a new rating replaces theirs and `rating: null` takes it back.
     author_id: Optional[str] = None
+    response_key: Optional[str] = None
 
 
 class RatingOut(CamelModel):

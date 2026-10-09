@@ -19,5 +19,10 @@ alter table public.proposals add column if not exists meeting_title text;
 alter table public.messages add column if not exists detection_result text;
 alter table public.messages add column if not exists detection_missing jsonb not null default '[]'::jsonb;
 
--- Feedback links back to the conversation it came from.
+-- Feedback links back to the conversation it came from. One rating per person per answer
+-- (src/lib/ratings.js): user_id + response_key identify it, version is the Expertise version rated.
 alter table public.feedback add column if not exists chat_id text;
+alter table public.feedback add column if not exists user_id text;
+alter table public.feedback add column if not exists response_key text;
+alter table public.feedback add column if not exists version text;
+create index if not exists feedback_rating_idx on public.feedback (response_key, user_id);

@@ -148,8 +148,11 @@ def delete_expertise(
     db: Session = Depends(get_db),
 ):
     e = _get(db, exp_id)
+    # deleteBlock in src/lib/permissions.js: live Expertise is deprecated first, never deleted outright.
+    if e.status == "approved":
+        raise HTTPException(status_code=409, detail="Live Expertise can't be deleted. Deprecate it first (Reviewer only).")
     if user.role != "reviewer" and not (e.status == "draft" and user.role == "contributor" and in_domain(user, e.domain)):
-        raise HTTPException(status_code=403, detail="Only the Reviewer, or a domain expert for a draft, can delete Expertise.")
+        raise HTTPException(status_code=403, detail="Only the Reviewer, or a domain expert for a draft, can delete this.")
     audit(db, user, "expertise.delete", "expertise", e.id, name=e.name)
     db.delete(e)
     db.commit()

@@ -236,6 +236,9 @@ export function useMeetingRecorder() {
           confidence: l.confidence,
         })),
         duration: elapsed,
+        // who recorded it (demo sign-in; the Edge Function prefers a real Supabase session)
+        recorded_by: useStore.getState().user?.name || '',
+        recorded_by_id: useStore.getState().user?.id || '',
       })
       // Only after the meeting is safely stored: send the accepted know-how to the Review Queue.
       const result = useStore.getState().captureMeetingInsights({

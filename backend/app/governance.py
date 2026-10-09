@@ -73,12 +73,21 @@ def _feedback_item(f: Feedback) -> dict:
         "comment": f.comment,
         "date": f.date.isoformat() if f.date else None,
         "chatId": f.chat_id,
+        "userId": f.user_id,
+        "responseKey": f.response_key,
+        "version": f.version,
     }
 
 
 def feedback_list(e: Expertise, rows: list[Feedback]) -> list[dict]:
     """Saved ratings (newest first), then the seed feedback stored on the row itself."""
     return [_feedback_item(f) for f in rows] + list(e.feedback or [])
+
+
+def recompute_success_rate(e: Expertise, rows: list[Feedback]) -> None:
+    """Helpful rate over every stored rating, as helpfulStats() in src/lib/ratings.js."""
+    rated = [f for f in feedback_list(e, rows) if f.get("rating") in ("up", "down")]
+    e.success_rate = sum(f["rating"] == "up" for f in rated) / len(rated) if rated else None
 
 
 # --- serialisation -----------------------------------------------------------

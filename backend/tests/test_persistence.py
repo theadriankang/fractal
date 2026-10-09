@@ -192,6 +192,28 @@ def test_thumbs_down_with_comment_creates_feedback_and_proposal(db):
     assert chat["messages"][1]["responses"][0]["rating"] == "down"
 
 
+def test_one_rating_per_person_per_answer(db):
+    _send()
+    rate = lambda rating: client.post("/api/responses/r1/rating", headers=as_(PRIYA),  # noqa: E731
+                                      json={"rating": rating, "authorId": "u-priya", "responseKey": "r1"}).json()
+    rate("up")
+    [e] = rate("up")["expertise"]
+    assert [f["rating"] for f in e["feedback"]] == ["up"] and e["successRate"] == 1.0
+    [e] = rate("down")["expertise"]  # replaces the 👍
+    assert [(f["rating"], f["userId"], f["responseKey"], f["version"]) for f in e["feedback"]] == [("down", "u-priya", "r1", "0.9")]
+    assert e["successRate"] == 0.0
+    [e] = rate(None)["expertise"]  # clicking the same thumb again takes it back
+    assert e["feedback"] == [] and e["successRate"] is None
+
+
+def test_live_expertise_cannot_be_deleted(db):
+    client.post("/api/expertise/exp-chiller/approve", headers=as_(ADRIAN))
+    r = client.delete("/api/expertise/exp-chiller", headers=as_(ADRIAN))
+    assert r.status_code == 409 and "Deprecate it first" in r.json()["detail"]
+    client.post("/api/expertise/exp-chiller/deprecate", headers=as_(ADRIAN))
+    assert client.delete("/api/expertise/exp-chiller", headers=as_(ADRIAN)).status_code == 204
+
+
 def test_thumbs_down_outside_domain_saves_feedback_only(db):
     _send(MARCUS)
     out = client.post("/api/responses/r1/rating", json={"rating": "down", "comment": "Wrong."}, headers=as_(MARCUS)).json()

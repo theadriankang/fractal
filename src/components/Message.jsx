@@ -100,14 +100,16 @@ function ResponseCard({ chatId, msg, idx, compare }) {
             <button
               className={`icon-btn ${r.rating === 'up' ? 'text-emerald-500' : ''}`}
               onClick={() => rateResponse(chatId, msg.id, idx, 'up')}
-              title="Good response"
+              title={r.rating === 'up' ? 'Remove your rating' : 'Good response'}
+              aria-pressed={r.rating === 'up'}
             >
               <ThumbsUp size={15} fill={r.rating === 'up' ? 'currentColor' : 'none'} />
             </button>
             <button
               className={`icon-btn ${r.rating === 'down' ? 'text-red-500' : ''}`}
-              onClick={() => setCorrecting(true)}
-              title="Bad response — suggest a correction"
+              onClick={() => (r.rating === 'down' ? rateResponse(chatId, msg.id, idx, 'down') : setCorrecting(true))}
+              title={r.rating === 'down' ? 'Remove your rating' : 'Bad response — suggest a correction'}
+              aria-pressed={r.rating === 'down'}
             >
               <ThumbsDown size={15} fill={r.rating === 'down' ? 'currentColor' : 'none'} />
             </button>

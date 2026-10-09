@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "validate:demo": "node scripts/validate-demo.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "validate:ratings": "node scripts/validate-ratings.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
