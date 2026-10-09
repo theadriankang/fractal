@@ -3,11 +3,35 @@ import { useSpeechRecognition } from './useSpeechRecognition'
 import { useMicAnalyser } from './useMicAnalyser'
 import { generateInsights, saveMeeting } from '../lib/meetingsService'
 import { readAttachment, validateFile, MAX_FILES } from '../lib/readAttachment'
+import { useStore } from '../store'
+import { TAXONOMY } from '../data/taxonomy'
 
 const uid = () => Math.random().toString(36).slice(2, 10)
 const PARAGRAPH_GAP_MS = 4000
 const MAX_BLOCK_CHARS = 450
 const DRAFT_KEY = 'fractal-meeting-draft'
+const AUTO_INCLUDE = 0.6 // category-selector confidence at or above which a link starts ticked
+
+// Catalog sent to the category selector: everything except deprecated Expertise, trimmed to what routing needs.
+const expertiseCatalog = () =>
+  useStore.getState().expertise
+    .filter((e) => e.status !== 'deprecated')
+    .map(({ id, name, domain, topic, summary, whenToUse, keywords }) => ({ id, name, domain, topic, summary, whenToUse, keywords }))
+const taxonomyPayload = () => TAXONOMY.map(({ domain, topics }) => ({ domain, topics }))
+
+// Server shape (snake_case) → editable client link
+const toLink = (l) => ({
+  key: uid(),
+  takeawayIndex: l.takeaway_index,
+  expertiseId: l.expertise_id || null,
+  newExpertise: l.new_expertise || null,
+  field: l.field || 'knowledge',
+  entry: l.entry || '',
+  confidence: typeof l.confidence === 'number' ? l.confidence : null,
+  rationale: l.rationale || '',
+  include: (l.confidence ?? 1) >= AUTO_INCLUDE,
+  manual: false,
+})
 
 export const joinBlocks = (blocks) => blocks.map((b) => b.text.trim()).filter(Boolean).join('\n\n')
 export const defaultTitle = (d = new Date()) =>
@@ -38,6 +62,8 @@ export function useMeetingRecorder() {
   const [insights, setInsights] = useState(null)
   const [error, setError] = useState(null)
   const [saved, setSaved] = useState(null)
+  const [links, setLinks] = useState([])                // category selector: takeaway → Expertise
+  const [captured, setCaptured] = useState(null)        // { proposals, drafts } sent to the Review Queue
   const [restored, setRestored] = useState(null)        // draft found on load
 
   const editingRef = useRef(null)
@@ -137,7 +163,7 @@ export function useMeetingRecorder() {
   const discard = useCallback(() => {
     speech.stop(); mic.close(); clearDraft()
     setStage('idle'); setBlocks([]); setTranscript(''); setTitle(''); setElapsed(0)
-    setFiles([]); setFileErrors([]); setInsights(null); setError(null); setSaved(null)
+    setFiles([]); setFileErrors([]); setInsights(null); setError(null); setSaved(null); setLinks([]); setCaptured(null)
   }, [speech, mic])
 
   const generate = useCallback(async () => {
@@ -145,8 +171,8 @@ export function useMeetingRecorder() {
     setError(null); setStage('generating')
     try {
       const parsed = await Promise.all(files.map((f) => readAttachment(f.file)))
-      const result = await generateInsights({ transcript, files: parsed })
-      setInsights(result); setStage('insights')
+      const result = await generateInsights({ transcript, files: parsed, expertise: expertiseCatalog(), taxonomy: taxonomyPayload() })
+      setInsights(result); setLinks((result.expertise_links || []).map(toLink)); setCaptured(null); setStage('insights')
     } catch (e) {
       setError(e.message); setStage('review')
     }
@@ -157,14 +183,31 @@ export function useMeetingRecorder() {
     setTitle(row.title); setTranscript(row.raw_transcript); setElapsed(row.duration || 0)
     setFiles([]); setFileErrors([]); setError(null); setSaved(row)
     setInsights({ cleaned_transcript: row.cleaned_transcript, summary: row.summary, key_takeaways: row.key_takeaways, action_items: row.action_items })
+    setLinks((row.expertise_links || []).map((l) => ({ ...toLink(l), include: true })))
+    setCaptured(null)
     setStage('saved')
   }, [])
 
-  const backToEdit = useCallback(() => { setInsights(null); setStage('review') }, [])
+  const backToEdit = useCallback(() => { setInsights(null); setLinks([]); setStage('review') }, [])
+
+  // ---------- category selector (human override) ----------
+  const updateLink = useCallback((key, patch) => setLinks((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l))), [])
+  const removeLink = useCallback((key) => setLinks((ls) => ls.filter((l) => l.key !== key)), [])
+  const addLink = useCallback((takeawayIndex) => {
+    const text = insights?.key_takeaways?.[takeawayIndex] || ''
+    setLinks((ls) => [...ls, {
+      key: uid(), takeawayIndex, expertiseId: null, field: 'knowledge', entry: text, confidence: null,
+      rationale: 'Added manually', include: true, manual: true,
+      newExpertise: { name: '', domain: TAXONOMY[0].domain, topic: TAXONOMY[0].topics[0] },
+    }])
+  }, [insights])
 
   const approve = useCallback(async () => {
     if (!insights) return
     setError(null); setStage('saving')
+    const nameOf = (id) => useStore.getState().expertise.find((e) => e.id === id)?.name || ''
+    const accepted = links.filter((l) => l.include && l.entry.trim() && (l.expertiseId || l.newExpertise?.name?.trim()))
+      .map((l) => ({ ...l, entry: l.entry.trim() }))
     try {
       const row = await saveMeeting({
         title: title || defaultTitle(),
@@ -174,18 +217,34 @@ export function useMeetingRecorder() {
         summary: insights.summary,
         key_takeaways: insights.key_takeaways,
         action_items: insights.action_items,
+        expertise_links: accepted.map((l) => ({
+          takeaway_index: l.takeawayIndex,
+          expertise_id: l.expertiseId,
+          expertise_name: l.expertiseId ? nameOf(l.expertiseId) : l.newExpertise?.name || '',
+          field: l.field,
+          entry: l.entry,
+          confidence: l.confidence,
+        })),
         duration: elapsed,
       })
+      // Only after the meeting is safely stored: send the accepted know-how to the Review Queue.
+      const result = useStore.getState().captureMeetingInsights({
+        meetingId: row.id,
+        title: row.title,
+        links: accepted.map((l) => ({ ...l, takeaway: insights.key_takeaways[l.takeawayIndex] || '' })),
+      })
+      setCaptured(result)
       clearDraft(); setFiles([]); setSaved(row); setStage('saved')
     } catch (e) {
       setError(e.message); setStage('insights')
     }
-  }, [insights, title, transcript, files, elapsed])
+  }, [insights, links, title, transcript, files, elapsed])
 
   return {
     stage, blocks, transcript, setTranscript, title, setTitle, elapsed, editingId, setEditingId,
     files, fileErrors, addFiles, removeFile,
     insights, saved, restored, resumeDraft, dismissDraft,
+    links, updateLink, removeLink, addLink, captured,
     interim: speech.interim,
     error: error || mic.error || speech.error,
     supported: speech.supported,

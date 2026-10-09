@@ -54,11 +54,21 @@ Browser (React)
 id, name, domain, topic, assetTypes[], status ('draft'|'in_review'|'approved'|'deprecated'), version ('1.3'),
 owner, ownerRole, reviewer, keywords[], usageCount, successRate (0–1|null), createdAt, updatedAt,
 summary, whenToUse, knowledge[], decisionLogic[], guardrails[], escalation[],
-related[] (expertise ids), sources[{type:'conversation'|'interview'|'document', chatId?, title, excerpt, date}],
+related[] (expertise ids), sources[{type:'conversation'|'interview'|'meeting'|'document', chatId?, meetingId?, title, excerpt, date}],
 versions[{version, date, author, approvedBy, note, snapshot:{summary,whenToUse,knowledge,decisionLogic,guardrails,escalation}}],
 feedback[{user, rating:'up'|'down', comment, date, chatId?}], origin? ('auto-detected')
 ```
-Proposal (revision): `{id, expertiseId, type:'revision', createdAt, author, reason, changes:{<field>:{add:[], remove:[]}}, chatId?}`
+Proposal (revision): `{id, expertiseId, type:'revision', createdAt, author, reason, changes:{<field>:{add:[], remove:[]}}, chatId?, meetingId?, meetingTitle?, sources?[]}`
+(`sources` on a proposal are appended to the Expertise when it is approved.)
+
+## Meeting → Expertise (category selector)
+The `meetings` Edge Function runs two Claude calls: (1) extraction (summary, takeaways, action items), then
+(2) a **category selector** that pairs each reusable takeaway with an Expertise from the catalog the browser sends
+(or proposes a new one) and the section it belongs in (knowledge / decisionLogic / guardrails / escalation), with a
+confidence score. The user can re-target, edit or untick each link in the Key Insights drawer. On "Approve & Save" the
+meeting is stored (with `expertise_links` for audit) and `captureMeetingInsights` in the store creates one revision
+proposal per touched Expertise, or an auto-detected draft for new ones. Live Expertise (and its SKILL.md export)
+changes only when a Reviewer merges them.
 
 ## Chat message shape (see src/store.js sendMessage)
 User msg: `{id, role:'user', content, files[], attachedExpertise[ids], webSearch, createdAt}`

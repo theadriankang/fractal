@@ -358,6 +358,8 @@ export const useStore = create(
         get().updateExpertise(e.id, {
           ...patch,
           version,
+          // provenance (e.g. the meeting a revision came from) follows the change into the Expertise
+          ...(p.sources?.length ? { sources: [...p.sources, ...e.sources] } : {}),
           versions: [...e.versions, { version, date: now(), author: p.author, approvedBy: get().user.name, note: p.reason, snapshot: snapshot(merged) }],
         })
         set((s) => ({ proposals: s.proposals.filter((x) => x.id !== pid) }))
@@ -372,6 +374,66 @@ export const useStore = create(
           ],
         }))
         get().showToast('Changes sent to the Review Queue')
+      },
+
+      // Meeting Recorder → category selector → Review Queue.
+      // links: [{ takeawayIndex, takeaway, expertiseId|null, newExpertise?{name,domain,topic}, field, entry, confidence }]
+      // Existing Expertise get one revision proposal each; unmatched know-how becomes an auto-detected draft.
+      // Nothing touches live Expertise until a Reviewer approves it.
+      captureMeetingInsights: ({ meetingId, title, links }) => {
+        const user = get().user.name
+        const source = (excerpt) => ({ type: 'meeting', meetingId, title, excerpt: excerpt.slice(0, 200), date: now() })
+        const proposals = []
+        const byExisting = new Map()
+        const byNew = new Map()
+        for (const l of links) {
+          if (l.expertiseId) {
+            const e = get().expertise.find((x) => x.id === l.expertiseId)
+            if (!e || (e[l.field] || []).includes(l.entry)) continue
+            if (!byExisting.has(e.id)) byExisting.set(e.id, [])
+            byExisting.get(e.id).push(l)
+          } else if (l.newExpertise?.name) {
+            const k = l.newExpertise.name.trim().toLowerCase()
+            if (!byNew.has(k)) byNew.set(k, [])
+            byNew.get(k).push(l)
+          }
+        }
+        for (const [expertiseId, ls] of byExisting) {
+          const changes = {}
+          for (const l of ls) {
+            changes[l.field] ??= { add: [], remove: [] }
+            if (!changes[l.field].add.includes(l.entry)) changes[l.field].add.push(l.entry)
+          }
+          proposals.push({
+            id: uid('prop'),
+            expertiseId,
+            type: 'revision',
+            createdAt: now(),
+            author: `${user} (captured from meeting)`,
+            reason: `Know-how from meeting "${title}" — routed by the category selector.`,
+            changes,
+            meetingId,
+            meetingTitle: title,
+            sources: ls.map((l) => source(l.takeaway || l.entry)),
+          })
+        }
+        const drafts = []
+        for (const ls of byNew.values()) {
+          const { name, domain, topic } = ls[0].newExpertise
+          const pick = (f) => ls.filter((l) => l.field === f).map((l) => l.entry)
+          drafts.push(get().createExpertise({
+            name, domain, topic,
+            origin: 'auto-detected',
+            summary: ls[0].takeaway || ls[0].entry,
+            knowledge: pick('knowledge'),
+            decisionLogic: pick('decisionLogic'),
+            guardrails: pick('guardrails'),
+            escalation: pick('escalation'),
+            sources: ls.map((l) => source(l.takeaway || l.entry)),
+          }))
+        }
+        if (proposals.length) set((s) => ({ proposals: [...proposals, ...s.proposals] }))
+        return { proposals: proposals.length, drafts: drafts.length }
       },
 
       rejectProposal: (pid) => {

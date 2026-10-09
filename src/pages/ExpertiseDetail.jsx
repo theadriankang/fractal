@@ -57,6 +57,9 @@ ${list(e.guardrails)}
 
 ## Escalation
 ${list(e.escalation)}
+
+## Sources
+${(e.sources || []).map((s) => `- ${s.type}: ${s.title}${s.date ? ` (${String(s.date).slice(0, 10)})` : ''}${s.excerpt ? ` — "${s.excerpt}"` : ''}`).join('\n') || '_None_'}
 `
 }
 
@@ -175,7 +178,7 @@ function Versions({ e }) {
   )
 }
 
-const SOURCE_ICON = { conversation: MessagesSquare, interview: Mic, document: FileText }
+const SOURCE_ICON = { conversation: MessagesSquare, interview: Mic, meeting: Mic, document: FileText }
 function Sources({ e }) {
   if (!e.sources.length) return <p className="mt-3 text-sm text-gray-500">No linked sources.</p>
   return (
