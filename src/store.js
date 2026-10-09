@@ -4,6 +4,7 @@ import { SEED_CHATS } from './data/chats'
 import { SEED_EXPERTISE, SEED_PROPOSALS, CONTENT_FIELDS } from './data/expertise'
 import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
+import { isLive, streamChat } from './lib/api'
 
 const uid = (p = 'id') => `${p}-${Math.random().toString(36).slice(2, 9)}`
 const now = () => new Date().toISOString()
@@ -36,6 +37,78 @@ function withSnapshots(list) {
 }
 
 const streams = new Map() // msgId -> [cancelFns]
+
+const HISTORY_TURNS = 20
+
+// Conversation before `msgId` as {role, content} turns. For assistant turns in
+// compare mode, prefer the answer from the same model.
+function historyBefore(chat, msgId, modelId) {
+  const end = chat.messages.findIndex((m) => m.id === msgId)
+  return chat.messages
+    .slice(0, end)
+    .map((m) => {
+      if (m.role === 'user') return { role: 'user', content: m.content }
+      const r = m.responses.find((x) => x.modelId === modelId && x.content) || m.responses.find((x) => x.content)
+      return { role: 'assistant', content: r?.content || '' }
+    })
+    .filter((t) => t.content)
+    .slice(-HISTORY_TURNS)
+}
+
+// Streams response `idx` of assistant message `msgId` into the store: from the
+// backend for live models, otherwise from the mock. Returns a cancel function.
+function streamResponse(get, chatId, msgId, idx, { prompt, matched, onFinish }) {
+  const patch = (fn) =>
+    get().patchMessage(chatId, msgId, (m) => ({ ...m, responses: m.responses.map((x, i) => (i === idx ? fn(x) : x)) }))
+  const chat = get().chats.find((c) => c.id === chatId)
+  const { modelId } = chat.messages.find((m) => m.id === msgId).responses[idx]
+
+  if (!isLive(modelId)) {
+    return streamText(
+      buildReply(prompt, modelId, matched),
+      (partial) => patch((x) => ({ ...x, content: partial })),
+      (final) => {
+        patch((x) => ({ ...x, content: final, streaming: false }))
+        onFinish?.()
+      },
+      get().settings.streamSpeed,
+    )
+  }
+
+  // Deltas arrive faster than the UI needs; flush them to the store every 50 ms.
+  let text = ''
+  let timer = null
+  let ended = false
+  const flush = () => {
+    timer = null
+    patch((x) => ({ ...x, content: text }))
+  }
+  const finish = (extra = {}) => {
+    if (ended) return
+    ended = true
+    clearTimeout(timer)
+    patch((x) => ({ ...x, content: text, streaming: false, ...extra }))
+    onFinish?.()
+  }
+  const abort = streamChat(
+    { model: modelId, messages: historyBefore(chat, msgId, modelId), expertise: matched },
+    {
+      // The backend reports the Expertise it actually applied (approved only).
+      onMeta: ({ expertise }) => patch((x) => ({ ...x, expertise })),
+      onDelta: (t) => {
+        text += t
+        timer ??= setTimeout(flush, 50)
+      },
+      onDone: () => finish(),
+      // With no answer text, no Expertise was applied either.
+      onError: (message) => finish({ error: message, ...(text ? {} : { expertise: [] }) }),
+    },
+  )
+  return () => {
+    abort()
+    finish()
+  }
+}
 
 const defaultConnections = Object.fromEntries(
   PROVIDERS.map((p) => [p.id, { enabled: true, apiKey: '', baseUrl: '' }]),
@@ -134,33 +207,17 @@ export const useStore = create(
           }))
 
         let remaining = responses.length
-        const cancels = responses.map((r, idx) => {
-          const full = buildReply(text, r.modelId, matched)
-          return streamText(
-            full,
-            (partial) =>
-              get().patchMessage(chatId, asstMsg.id, (m) => ({
-                ...m,
-                responses: m.responses.map((x, i) => (i === idx ? { ...x, content: partial } : x)),
-              })),
-            (final) => {
-              get().patchMessage(chatId, asstMsg.id, (m) => ({
-                ...m,
-                responses: m.responses.map((x, i) => (i === idx ? { ...x, content: final, streaming: false } : x)),
-              }))
-              remaining -= 1
-              if (remaining === 0) {
-                streams.delete(asstMsg.id)
-                if (get().settings.autoDetect) {
-                  const chat = get().chats.find((c) => c.id === chatId)
-                  const det = detectExpertise(text, chat, matched)
-                  if (det) get().patchMessage(chatId, asstMsg.id, (m) => ({ ...m, detection: det, detectionState: 'pending' }))
-                }
-              }
-            },
-            settings.streamSpeed,
-          )
-        })
+        const onFinish = () => {
+          remaining -= 1
+          if (remaining > 0) return
+          streams.delete(asstMsg.id)
+          if (get().settings.autoDetect) {
+            const chat = get().chats.find((c) => c.id === chatId)
+            const det = detectExpertise(text, chat, matched)
+            if (det) get().patchMessage(chatId, asstMsg.id, (m) => ({ ...m, detection: det, detectionState: 'pending' }))
+          }
+        }
+        const cancels = responses.map((_, idx) => streamResponse(get, chatId, asstMsg.id, idx, { prompt: text, matched, onFinish }))
         streams.set(asstMsg.id, cancels)
       },
 
@@ -177,14 +234,10 @@ export const useStore = create(
         const matched = get().expertise.filter((e) => r.expertise.some((x) => x.id === e.id))
         get().patchMessage(chatId, msgId, (m) => ({
           ...m,
-          responses: m.responses.map((x, k) => (k === idx ? { ...x, content: '', streaming: true, rating: null } : x)),
+          responses: m.responses.map((x, k) => (k === idx ? { ...x, content: '', streaming: true, rating: null, error: undefined } : x)),
         }))
-        streamText(
-          buildReply(prompt, r.modelId, matched),
-          (p) => get().patchMessage(chatId, msgId, (m) => ({ ...m, responses: m.responses.map((x, k) => (k === idx ? { ...x, content: p } : x)) })),
-          (f) => get().patchMessage(chatId, msgId, (m) => ({ ...m, responses: m.responses.map((x, k) => (k === idx ? { ...x, content: f, streaming: false } : x)) })),
-          get().settings.streamSpeed,
-        )
+        const cancel = streamResponse(get, chatId, msgId, idx, { prompt, matched })
+        streams.set(msgId, [...(streams.get(msgId) || []), cancel])
       },
 
       // Rating feeds the Expertise feedback loop.
