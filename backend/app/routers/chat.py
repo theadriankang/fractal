@@ -4,7 +4,7 @@ import anthropic
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..llm import claude
+from ..llm import claude, registry
 from ..prompts import build_system_prompt
 from ..schemas import ChatStreamRequest
 
@@ -25,18 +25,27 @@ def to_claude_messages(turns) -> list[dict]:
 
 @router.get("/models")
 def models():
-    """Models this backend can answer for. Everything else stays on the front-end mock for now."""
-    available = claude.is_configured()
-    return [{"id": key, "model": spec["model"], "available": available} for key, spec in claude.MODELS.items()]
+    """All catalogued models with provider and availability flag."""
+    return [
+        {"id": e.id, "provider": e.provider, "available": registry.is_available(e)}
+        for e in registry.all_models()
+    ]
 
 
 @router.post("/chat/stream")
 async def chat_stream(req: ChatStreamRequest):
-    """Streams one model's answer as Server-Sent Events: meta, delta*, then done or error."""
-    if req.model not in claude.MODELS:
-        raise HTTPException(400, f"Model '{req.model}' is not served by this backend yet.")
-    if not claude.is_configured():
-        raise HTTPException(503, "ANTHROPIC_API_KEY is not set in backend/.env.")
+    """Streams one model's answer as Server-Sent Events: meta, delta*, then done or error.
+
+    Accepts any available model id from the catalogue plus "auto"
+    (resolves to claude-sonnet for now).
+    """
+    resolved_id = registry.resolve_auto(req.model)
+    entry = registry.get(resolved_id)
+    if entry is None:
+        raise HTTPException(400, f"Model '{req.model}' is not recognised.")
+    if not registry.is_available(entry):
+        raise HTTPException(400, f"Model '{req.model}' is not available (no API key configured).")
+
     messages = to_claude_messages(req.messages)
     if not messages or messages[-1]["role"] != "user":
         raise HTTPException(400, "The conversation must end with a user message.")
@@ -48,7 +57,7 @@ async def chat_stream(req: ChatStreamRequest):
     async def events():
         yield sse("meta", {"expertise": [{"id": e.id, "version": e.version} for e in applied]})
         try:
-            async for kind, data in claude.stream_reply(req.model, system, messages):
+            async for kind, data in registry.stream_reply(entry, system, messages):
                 yield sse(kind, data)
         except anthropic.AuthenticationError:
             yield sse("error", {"message": "Claude rejected the API key. Check ANTHROPIC_API_KEY in backend/.env."})
@@ -58,6 +67,9 @@ async def chat_stream(req: ChatStreamRequest):
             yield sse("error", {"message": f"Claude API error ({e.status_code}): {e.message}"})
         except anthropic.APIConnectionError:
             yield sse("error", {"message": "The backend could not reach the Claude API."})
+        except Exception as e:
+            # Catch-all so provider errors become an error event, never a crash.
+            yield sse("error", {"message": f"{entry.id} request failed: {e}"})
 
     return StreamingResponse(
         events(),

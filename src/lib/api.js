@@ -1,15 +1,40 @@
 // ---------------------------------------------------------------------------
 // Backend client (FastAPI in /backend, proxied at /api by vite.config.js).
-// Only Claude models are served by the backend so far; every other model, and
-// everything when VITE_USE_MOCK=true, keeps using src/lib/mockApi.js.
+// Live models come from GET /api/models; unavailable models (and everything
+// when VITE_USE_MOCK=true) keep using src/lib/mockApi.js.
 // ---------------------------------------------------------------------------
 
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
-const BACKEND_MODELS = new Set(['claude-opus', 'claude-sonnet', 'claude-haiku'])
+// Filled from GET /api/models on first load. Unavailable models keep the
+// existing mock fallback so the front end always works, even with no keys.
+let _liveModels = new Set()
+let _fetched = false
+
+async function refreshLiveModels() {
+  if (_fetched) return
+  try {
+    const res = await fetch('/api/models')
+    if (res.ok) {
+      const list = await res.json()
+      _liveModels = new Set(list.filter((m) => m.available).map((m) => m.id))
+    }
+  } catch {
+    // Backend offline — leave _liveModels empty; isLive returns false.
+  }
+  _fetched = true
+}
+
+// Kick off the fetch eagerly (fire-and-forget).
+refreshLiveModels()
 
 /** True when this model's answers come from the backend rather than the mock. */
-export const isLive = (modelId) => !USE_MOCK && BACKEND_MODELS.has(modelId)
+export function isLive(modelId) {
+  return !USE_MOCK && _liveModels.has(modelId)
+}
+
+/** Re-fetch the live model list from the backend (returns a promise). */
+export { refreshLiveModels }
 
 // The Expertise fields the backend's system prompt uses.
 const EXPERTISE_FIELDS = ['id', 'name', 'version', 'status', 'owner', 'whenToUse', 'knowledge', 'decisionLogic', 'guardrails', 'escalation']
