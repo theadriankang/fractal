@@ -2,10 +2,11 @@ import { useMemo, useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
 import {
   PanelLeftClose, SquarePen, Search, BookOpenCheck, MoreHorizontal, Pin, PinOff, Pencil, Trash2,
-  Settings, RotateCcw, ShieldCheck, UserRound, Folder, ChevronDown, ChevronRight, Mic,
+  Settings, RotateCcw, Folder, ChevronDown, ChevronRight, Mic, Check, ChevronsUpDown, UserPlus, LogOut,
 } from 'lucide-react'
-import { useStore, reviewCount } from '../store'
-import { DEMO_USERS } from '../data/users'
+import { useStore, reviewCount, chatOwner } from '../store'
+import { userById, roleSummary } from '../data/users'
+import { Avatar } from '../pages/Login'
 import { Logo, Dropdown } from './ui'
 
 function groupChats(chats) {
@@ -85,13 +86,16 @@ function Section({ title, icon, children, collapsible = false }) {
 
 export default function Sidebar() {
   const navigate = useNavigate()
-  const { chats, toggleSidebar, newChat, openSettings, user, switchUser, resetDemo } = useStore()
+  const { chats, toggleSidebar, newChat, openSettings, user, session, switchAccount, logout, logoutAll, resetDemo } = useStore()
+  const signedIn = session.signedIn.map(userById).filter(Boolean)
   const pending = useStore(reviewCount)
   const [q, setQ] = useState('')
 
   const filtered = useMemo(
-    () => [...chats].filter((c) => c.title.toLowerCase().includes(q.toLowerCase())).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [chats, q],
+    () => [...chats]
+      .filter((c) => chatOwner(c) === user.id && c.title.toLowerCase().includes(q.toLowerCase()))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [chats, q, user.id],
   )
   const pinned = filtered.filter((c) => c.pinned)
   const folders = [...new Set(filtered.filter((c) => c.folder && !c.pinned).map((c) => c.folder))]
@@ -157,40 +161,41 @@ export default function Sidebar() {
         {filtered.length === 0 && <p className="px-3 py-6 text-center text-sm text-gray-500">No chats found</p>}
       </div>
 
-      {/* user */}
+      {/* account (Claude-style: active account, other signed-in accounts, add / log out) */}
       <div className="border-t border-gray-200 p-2 dark:border-gray-850">
         <Dropdown
-          className="bottom-full mb-1 w-full"
+          className="bottom-full mb-1 w-[calc(260px-1rem)]"
           trigger={() => (
-            <button className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-850">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-accent-500 to-indigo-500 text-sm font-semibold text-white">
-                {user.name[0]}
+            <button className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-850" aria-label="Account menu">
+              <Avatar user={user} size={32} />
+              <span className="min-w-0 flex-1 text-left">
+                <span className="block truncate text-sm font-medium">{user.name}</span>
+                <span className="block truncate text-xs text-gray-500">{roleSummary(user)}</span>
               </span>
-              <span className="flex-1 text-left">
-                <span className="block text-sm font-medium">{user.name}</span>
-                <span className="block truncate text-xs text-gray-500">
-                  {user.role === 'reviewer' ? 'Reviewer' : `Contributor · ${(user.domains || []).join(', ')}`}
-                </span>
-              </span>
+              <ChevronsUpDown size={15} className="shrink-0 text-gray-400" />
             </button>
           )}
         >
-          <button className="menu-item" onClick={() => openSettings()}><Settings size={15} /> Settings</button>
-          <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
-          <p className="px-2.5 pb-1 pt-1.5 text-xs text-gray-500">Sign in as (demo)</p>
-          {DEMO_USERS.map((u) => (
-            <button key={u.id} className="menu-item items-start" onClick={() => switchUser(u.id)}>
-              {u.role === 'reviewer' ? <ShieldCheck size={15} className="mt-0.5 shrink-0" /> : <UserRound size={15} className="mt-0.5 shrink-0" />}
-              <span className="min-w-0 flex-1 text-left">
-                <span className="block">{u.name} {user.id === u.id && '✓'}</span>
-                <span className="block truncate text-[11px] text-gray-500">
-                  {u.role === 'reviewer' ? 'Reviewer · approves all domains' : `Contributor · ${u.domains.join(', ')}`}
-                </span>
+          <p className="truncate px-2.5 pb-1.5 pt-1 text-xs text-gray-500">{user.email}</p>
+          {signedIn.map((u) => (
+            <button key={u.id} className="menu-item" onClick={() => { if (u.id !== user.id) { switchAccount(u.id); navigate('/') } }}>
+              <Avatar user={u} size={24} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{u.name}</span>
+                <span className="block truncate text-[11px] text-gray-500">{roleSummary(u)}</span>
               </span>
+              {u.id === user.id && <Check size={15} className="shrink-0 text-accent-500" />}
             </button>
           ))}
+          <button className="menu-item" onClick={() => navigate('/login?add=1')}><UserPlus size={15} /> Add another account</button>
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
+          <button className="menu-item" onClick={() => openSettings()}><Settings size={15} /> Settings</button>
           <button className="menu-item" onClick={() => { resetDemo(); navigate('/') }}><RotateCcw size={15} /> Reset demo data</button>
+          <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
+          <button className="menu-item" onClick={() => { const next = logout(); navigate(next ? '/' : '/login') }}><LogOut size={15} /> Log out</button>
+          {signedIn.length > 1 && (
+            <button className="menu-item" onClick={() => { logoutAll(); navigate('/login') }}><LogOut size={15} /> Log out of all accounts</button>
+          )}
         </Dropdown>
       </div>
     </aside>

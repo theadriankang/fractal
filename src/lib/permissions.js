@@ -1,24 +1,62 @@
-// Who may contribute know-how to which Expertise.
+// Who may do what with Expertise. One place, used by the UI and re-checked inside store actions.
 //
-// Rule: only a CONTRIBUTOR who is an expert in an Expertise's DOMAIN may add to it — capture it
-// from chat or a meeting, propose a revision, create or edit a draft, or submit it for review.
-// Reviewers govern (approve, reject, roll back, deprecate, restore) but do not author content,
-// so nobody approves their own contribution (separation of duties).
-// These checks run in the UI and again inside store actions; the backend repeats them for the
-// extractor, and real enforcement moves server-side with Supabase Auth (Prompt 8).
+//  Reviewer (Adrian)  — sees every queue item in every domain; approves, rejects, rolls back,
+//                       deprecates, restores. Never authors content.
+//  Domain expert      — contributes (capture from chat/meetings, propose revisions incl. 👎
+//                       corrections, create/edit drafts, submit) AND reviews queue items — but
+//                       only in their own domains, and never their own contribution (four eyes).
+//  Intern             — uses approved Expertise in chat and reads it; can rate answers but cannot
+//                       contribute or review anything.
+//
+// Real enforcement moves server-side with Supabase Auth (BUILD_PROMPTS Prompt 8); the backend
+// already repeats the contribution check for the know-how extractor.
 
 export const isContributor = (user) => user?.role === 'contributor'
 export const isReviewer = (user) => user?.role === 'reviewer'
+export const isIntern = (user) => user?.role === 'intern'
+
+const inDomain = (user, domain) => !!domain && (user?.domains || []).includes(domain)
 
 /** True when `user` may contribute to Expertise in `domain`. */
-export const canContribute = (user, domain) => isContributor(user) && !!domain && (user.domains || []).includes(domain)
+export const canContribute = (user, domain) => isContributor(user) && inDomain(user, domain)
 
 /** Human-readable reason `user` can't contribute to `domain`, or null if they can. */
 export function contributeBlock(user, domain) {
-  if (!isContributor(user)) return 'Only contributors can add know-how — reviewers approve it.'
-  if (!canContribute(user, domain)) return `Only ${domain} experts can contribute here. Your domains: ${(user.domains || []).join(', ') || 'none'}.`
+  if (isIntern(user)) return 'Interns can use Expertise but can’t contribute to it.'
+  if (isReviewer(user)) return 'Reviewers approve know-how but don’t contribute it.'
+  if (!canContribute(user, domain)) return `Only ${domain} experts can contribute here. Your domains: ${(user?.domains || []).join(', ') || 'none'}.`
   return null
 }
 
-/** May the user edit this Expertise's content? Same rule: contributors expert in its domain. */
+/** May the user edit this Expertise's content? Same rule as contributing. */
 export const canEdit = (user, expertise) => canContribute(user, expertise?.domain)
+
+/** Was this queue item contributed by `user`? (drafts: owner / capturer; proposals: author) */
+export function isOwnContribution(user, item) {
+  if (!user || !item) return false
+  if (item.authorId) return item.authorId === user.id
+  const who = item.capture?.capturedBy || item.author || item.owner || ''
+  return who === user.name || who.startsWith(`${user.name} (`)
+}
+
+/** Does `user` see Review Queue items in `domain`? */
+export const seesQueue = (user, domain) => isReviewer(user) || (isContributor(user) && inDomain(user, domain))
+
+/** May the user open the Review Queue at all? */
+export const canOpenQueue = (user) => isReviewer(user) || isContributor(user)
+
+/**
+ * May `user` approve or reject a queue item in `domain`? `item` (draft Expertise or proposal) is
+ * used for the no-self-approval rule. Returns null if allowed, otherwise the reason.
+ */
+export function reviewBlock(user, domain, item) {
+  if (isIntern(user)) return 'Interns can’t review Expertise.'
+  if (isReviewer(user)) return null
+  if (!inDomain(user, domain)) return `Only ${domain} experts or the Reviewer can decide this.`
+  if (isOwnContribution(user, item)) return 'You can’t approve your own contribution — another expert or the Reviewer must.'
+  return null
+}
+export const canReview = (user, domain, item) => !reviewBlock(user, domain, item)
+
+/** Rollback, deprecate and restore change what is live for everyone: head reviewer only. */
+export const canGovern = (user) => isReviewer(user)

@@ -108,9 +108,11 @@ def body(user=HAFIZ, msg=LIFT_MSG):
     return req(user=user, msg=msg).model_dump()
 
 
-def test_endpoint_rejects_reviewers():
+def test_endpoint_rejects_reviewers_and_interns():
     r = client.post("/api/expertise/extract", json=body(user=ADRIAN))
     assert r.status_code == 403
+    intern = {"name": "Ethan Lim", "role": "intern", "domains": []}
+    assert client.post("/api/expertise/extract", json=body(user=intern)).status_code == 403
 
 
 def test_endpoint_skips_short_messages_without_calling_claude(monkeypatch):
