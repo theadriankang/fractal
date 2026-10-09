@@ -269,6 +269,9 @@ export const useStore = create(
           id,
           name: 'Untitled Expertise',
           domain: 'Asset Operations',
+          topic: 'Operating Procedures',
+          assetTypes: ['Office'],
+          related: [],
           status: 'draft',
           version: '0.1',
           owner: get().user.name,
@@ -383,7 +386,9 @@ export const useStore = create(
     }),
     {
       name: 'fractal-store',
-      version: 1,
+      version: 2,
+      // v2 introduced the Domain → Topic taxonomy; older saved data is reset to the new seed.
+      migrate: (state, version) => (version < 2 ? {} : state),
       partialize: (s) => ({
         chats: s.chats,
         expertise: s.expertise,

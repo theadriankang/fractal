@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 import { getModel, getProvider } from '../data/models'
 import { DOMAINS } from '../data/expertise'
+import { TAXONOMY } from '../data/taxonomy'
 
 const tokenize = (s) => s.toLowerCase()
 
@@ -130,6 +131,9 @@ export function detectExpertise(prompt, chat, matched) {
     draft: {
       name: subject ? `${titleCase(subject.replace(/s$/, ''))} ${NAME_SUFFIX[domain] || 'Know-how'}` : `${domain || 'Operational'} Know-how`,
       domain: domain || DOMAINS[0],
+      topic: guessTopic(prompt, domain || DOMAINS[0]),
+      assetTypes: /data cent/i.test(prompt) ? ['Data Centre'] : ['Office'],
+      related: [],
       summary: `Captured from a conversation: ${prompt.slice(0, 140)}${prompt.length > 140 ? '…' : ''}`,
       whenToUse: '',
       knowledge: knowhow.length ? knowhow : sentences.slice(0, 2),
@@ -148,6 +152,28 @@ const NAME_SUFFIX = {
   Sustainability: 'Reporting Method',
   'Tenant Experience': 'Response Playbook',
   'Asset Operations': 'Operating Guide',
+}
+
+const TOPIC_HINTS = [
+  [/chiller|ahu|hvac|cooling|air.?con/i, 'Chillers & HVAC'],
+  [/lift|elevator|escalator/i, 'Lifts & Escalators'],
+  [/generator|ups|electric|power|switchboard/i, 'Electrical & Power'],
+  [/water|pipe|leak|plumb|tank/i, 'Plumbing & Water'],
+  [/peak|demand|tariff/i, 'Peak Demand'],
+  [/solar|pv|renewable/i, 'Solar & Renewables'],
+  [/capex|budget/i, 'Budgeting & CAPEX'],
+  [/vendor|contractor/i, 'Vendor Management'],
+  [/complain|feedback/i, 'Complaints & Feedback'],
+  [/notice|circular|announce/i, 'Communications'],
+  [/renew|retention/i, 'Renewals & Retention'],
+  [/rent review|negotiat/i, 'Rent Reviews'],
+  [/carbon|emission|scope/i, 'Carbon Reporting'],
+  [/green mark/i, 'Green Mark'],
+]
+function guessTopic(prompt, domain) {
+  const t = TAXONOMY.find((x) => x.domain === domain)
+  const hit = TOPIC_HINTS.find(([re, topic]) => re.test(prompt) && t?.topics.includes(topic))
+  return hit ? hit[1] : t?.topics[0]
 }
 
 function titleCase(s) {

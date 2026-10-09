@@ -4,7 +4,8 @@ import { useStore } from './store'
 import Sidebar from './components/Sidebar'
 import SettingsModal from './components/SettingsModal'
 import ChatPage from './pages/ChatPage'
-import ExpertiseLibrary from './pages/ExpertiseLibrary'
+import ExpertiseLayout from './pages/ExpertiseLayout'
+import ExpertiseHome, { ExpertiseDomain } from './pages/ExpertiseHome'
 import ExpertiseDetail from './pages/ExpertiseDetail'
 import ReviewQueue from './pages/ReviewQueue'
 
@@ -41,9 +42,12 @@ export default function App() {
         <Routes>
           <Route path="/" element={<ChatPage />} />
           <Route path="/c/:chatId" element={<ChatPage />} />
-          <Route path="/expertise" element={<ExpertiseLibrary />} />
-          <Route path="/expertise/review" element={<ReviewQueue />} />
-          <Route path="/expertise/:id" element={<ExpertiseDetail />} />
+          <Route path="/expertise" element={<ExpertiseLayout />}>
+            <Route index element={<ExpertiseHome />} />
+            <Route path="review" element={<ReviewQueue />} />
+            <Route path="d/:slug" element={<ExpertiseDomain />} />
+            <Route path=":id" element={<ExpertiseDetail />} />
+          </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

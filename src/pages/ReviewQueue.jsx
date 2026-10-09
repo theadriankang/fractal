@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom'
 import { Check, X, Sparkles, GitPullRequestArrow, FileEdit, ShieldAlert, MessageSquare } from 'lucide-react'
 import { useStore } from '../store'
-import TopBar from '../components/TopBar'
-import { ExpertiseTabs, domainGradient } from './ExpertiseLibrary'
+import { domainGradient } from '../data/taxonomy'
+import { Breadcrumb } from './ExpertiseLayout'
 import { StatusBadge, timeAgo } from '../components/ui'
 
 const FIELD_LABELS = {
@@ -73,7 +73,7 @@ function DraftCard({ e }) {
             <StatusBadge status={e.status} />
           </div>
           <p className="text-xs text-gray-500">
-            {e.domain} · {e.origin === 'auto-detected' ? 'Auto-detected from a conversation' : `Created by ${e.owner}`} · {timeAgo(e.updatedAt)}
+            {e.domain} › {e.topic} · {e.origin === 'auto-detected' ? 'Auto-detected from a conversation' : `Created by ${e.owner}`} · {timeAgo(e.updatedAt)}
           </p>
           <p className="mt-2 line-clamp-2 text-sm text-gray-600 dark:text-gray-400">{e.summary}</p>
           <div className="mt-2 flex gap-4 text-xs text-gray-500">
@@ -112,11 +112,11 @@ export default function ReviewQueue() {
   )
 
   return (
-    <div className="flex h-full flex-col">
-      <TopBar><ExpertiseTabs /></TopBar>
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl px-6 pb-16 pt-6">
-          <h1 className="text-2xl font-semibold tracking-tight">Review Queue</h1>
+    <div>
+      <div>
+        <div className="mx-auto max-w-4xl px-8 pb-16 pt-8">
+          <Breadcrumb items={[{ label: 'Expertise', to: '/expertise' }, { label: 'Review Queue' }]} />
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight">Review Queue</h1>
           <p className="mt-1 max-w-2xl text-sm text-gray-500">
             Nothing reaches operational use without a human. New Expertise and every change to an existing one — from experts, corrections or 👎 feedback — waits here for a Reviewer.
           </p>

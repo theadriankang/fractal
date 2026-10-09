@@ -33,14 +33,15 @@ Requires Node 18+. Data persists in your browser (localStorage). **User menu →
 - **👎 + correction** → becomes a *proposed revision* in the Review Queue.
 - **"Fractal noticed reusable know-how"** card — when someone *shares* know-how in a chat ("we always…", "in my experience…"), Fractal offers to save it as a draft Expertise (or a revision to an existing one), with the conversation linked as a source.
 
-### Expertise (left sidebar)
-- **Library** — cards/list, filters by domain (Asset Ops, Energy, Leasing, Technical Services, Sustainability, Tenant Experience) and status (Draft → In Review → Approved → Deprecated), with usage stats.
-- **Detail page** — Purpose, Knowledge & heuristics, Decision logic, Guardrails, Escalation rules; Governance (owner, reviewer, approval), Boundaries (may recommend / needs a human / must escalate), Usage, trigger keywords.
-- **Versions** — full history, diff against current, **roll back** (Reviewer only).
-- **Sources** — the conversations, expert interviews and documents it was learned from.
-- **Feedback** — every 👍/👎 on answers that used it.
-- **Export** to Markdown (SKILL.md-style) or JSON — knowledge stays portable and vendor-independent.
-- **Edit** — editing a *live* Expertise creates a proposed revision instead of changing it directly.
+### Expertise (docs-style knowledge base)
+Organised as **Domain → Topic → Expertise** (taxonomy in `src/data/taxonomy.js`), with **asset type** (Office, Data Centre, Logistics, Retail) as a cross-cutting filter.
+- **Left nav tree** — collapsible domains and topics, counts, status dots, search, asset-type filter, "Live only" toggle.
+- **Overview** — stats, domain cards, recently updated, most applied.
+- **Domain pages** — every topic in the domain with its Expertise listed; "+ Add" creates Expertise pre-filed in that topic.
+- **Expertise page** (one scrolling doc) — breadcrumb, summary, metadata strip, When to use, Boundaries, Knowledge, Decision logic, Guardrails, Escalation, **Related Expertise** (cross-domain links), Sources, Feedback, Version history (diff + **roll back**), Previous/Next, and an **"On this page"** table of contents with scroll-spy.
+- **Copy page** → copy/download as Markdown (SKILL.md-style) or JSON — portable and vendor-independent.
+- **Edit** — domain/topic/asset types/owner/keywords + content. Editing a *live* Expertise creates a proposed revision instead.
+- **Auto-placement** — Expertise detected in chat is pre-filed into a suggested domain › topic.
 
 ### Review Queue
 - Submitted Expertise awaiting approval, proposed revisions (with diff), and drafts.

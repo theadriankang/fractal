@@ -176,7 +176,7 @@ function DetectionCard({ chatId, msg }) {
           </p>
           <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
             {d.kind === 'new'
-              ? <>Save it as a draft Expertise in <b className="text-gray-700 dark:text-gray-200">{d.draft.domain}</b> so the next person gets the same answer. A reviewer approves it before it goes live.</>
+              ? <>Save it as a draft Expertise in <b className="text-gray-700 dark:text-gray-200">{d.draft.domain} › {d.draft.topic}</b> so the next person gets the same answer. A reviewer approves it before it goes live.</>
               : 'You shared something the current version doesn\'t cover. Propose it as a revision for review?'}
           </p>
           <div className="mt-2 rounded-xl bg-white/60 p-3 text-sm ring-1 ring-gray-200 dark:bg-gray-900/60 dark:ring-gray-800">

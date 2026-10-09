@@ -1,6 +1,7 @@
 // Seed Expertise ("Intelligence Pills") for the Keppel AI HARVEST demo.
 // Each Expertise is a governed, versioned, reusable domain capability.
 
+export { TAXONOMY } from './taxonomy'
 export const DOMAINS = [
   'Asset Operations',
   'Energy Optimisation',
@@ -27,6 +28,9 @@ export const SEED_EXPERTISE = [
     id: 'exp-chiller-fault',
     name: 'Chiller Plant Fault Triage',
     domain: 'Technical Services',
+    topic: 'Chillers & HVAC',
+    assetTypes: ['Office', 'Data Centre'],
+    related: ['exp-tenant-complaint', 'exp-chiller-seq', 'exp-energy-peak'],
     status: 'approved',
     version: '1.3',
     owner: 'Tan Wei Ming',
@@ -84,6 +88,9 @@ export const SEED_EXPERTISE = [
     id: 'exp-energy-peak',
     name: 'Peak Demand Shaving',
     domain: 'Energy Optimisation',
+    topic: 'Peak Demand',
+    assetTypes: ['Office', 'Retail'],
+    related: ['exp-chiller-seq', 'exp-tenant-complaint'],
     status: 'approved',
     version: '2.0',
     owner: 'Nurul Huda',
@@ -123,6 +130,9 @@ export const SEED_EXPERTISE = [
     id: 'exp-tenant-complaint',
     name: 'Tenant Complaint Handling (Comfort)',
     domain: 'Tenant Experience',
+    topic: 'Complaints & Feedback',
+    assetTypes: ['Office', 'Retail'],
+    related: ['exp-chiller-fault', 'exp-lease-renewal'],
     status: 'approved',
     version: '1.1',
     owner: 'Jasmine Ong',
@@ -158,6 +168,9 @@ export const SEED_EXPERTISE = [
     id: 'exp-lease-renewal',
     name: 'Lease Renewal Risk Signals',
     domain: 'Leasing',
+    topic: 'Renewals & Retention',
+    assetTypes: ['Office', 'Logistics'],
+    related: ['exp-tenant-complaint', 'exp-rent-review'],
     status: 'in_review',
     version: '0.9',
     owner: 'Marcus Teo',
@@ -190,6 +203,9 @@ export const SEED_EXPERTISE = [
     id: 'exp-carbon-report',
     name: 'Scope 2 Carbon Reporting',
     domain: 'Sustainability',
+    topic: 'Carbon Reporting',
+    assetTypes: ['Office', 'Data Centre', 'Logistics'],
+    related: ['exp-green-mark'],
     status: 'draft',
     version: '0.1',
     owner: 'Fractal (auto-draft)',
@@ -212,6 +228,142 @@ export const SEED_EXPERTISE = [
     origin: 'auto-detected',
   },
 ]
+
+
+// ---------------------------------------------------------------------------
+// Additional seed Expertise so the taxonomy looks like a real portfolio.
+// ---------------------------------------------------------------------------
+function mk(o) {
+  const v = o.version || '1.0'
+  return {
+    status: 'approved', reviewer: 'Rachel Lim', keywords: [], usageCount: 0, successRate: null,
+    whenToUse: '', escalation: [], sources: [], feedback: [], related: [], assetTypes: ['Office'],
+    createdAt: d(o.created || '2026-08-15'), updatedAt: d(o.updated || '2026-09-20'),
+    versions: o.status && o.status !== 'approved' ? [] : [{ version: v, date: d(o.updated || '2026-09-20'), author: o.owner, approvedBy: 'Rachel Lim', note: 'Initial capture.' }],
+    version: v,
+    ...o,
+  }
+}
+
+const EXTRA = [
+  mk({
+    id: 'exp-lift-entrapment', name: 'Lift Entrapment Response', domain: 'Technical Services', topic: 'Lifts & Escalators',
+    owner: 'Hafiz Rahman', ownerRole: 'Lift & Escalator Supervisor', usageCount: 23, successRate: 0.96, version: '1.2',
+    assetTypes: ['Office', 'Retail', 'Logistics'], keywords: ['lift', 'elevator', 'trapped', 'entrapment', 'stuck'],
+    related: ['exp-shutdown-notice'],
+    summary: 'What to do in the first 30 minutes when passengers are trapped in a lift — communication, safe rescue and reporting.',
+    whenToUse: 'Any lift alarm call or report of passengers trapped.',
+    knowledge: ['Most entrapments resolve with a controller reset by the lift contractor within 20 minutes.', 'Talking to passengers every 5 minutes is the single biggest factor in complaint outcomes.'],
+    decisionLogic: ['Establish two-way intercom contact; confirm number of passengers and any medical concerns.', 'Call the lift contractor hotline; log call time.', 'If medical concern or >30 min → call SCDF (995).', 'After release, take lift out of service until contractor certifies it.'],
+    guardrails: ['Never attempt a manual rescue without a certified lift technician.', 'Never return the lift to service without contractor sign-off.'],
+    escalation: ['Medical concern → SCDF immediately.', 'Repeat entrapment in same lift within 30 days → Chief Engineer + BCA report review.'],
+  }),
+  mk({
+    id: 'exp-escalator-comb', name: 'Escalator Comb Plate Checks', domain: 'Technical Services', topic: 'Lifts & Escalators',
+    owner: 'Hafiz Rahman', ownerRole: 'Lift & Escalator Supervisor', usageCount: 9, assetTypes: ['Retail', 'Office'], keywords: ['escalator', 'comb', 'step'],
+    summary: 'Daily visual check for broken comb teeth and step gaps — the most common cause of escalator injuries.',
+    knowledge: ['Two or more adjacent broken comb teeth is a stop-and-repair condition.'],
+    decisionLogic: ['Walk each escalator before opening.', 'Check comb teeth at top and bottom landings.', 'If ≥2 adjacent teeth broken → stop escalator and barricade.'],
+    guardrails: ['Do not run an escalator with known comb damage, even briefly.'],
+  }),
+  mk({
+    id: 'exp-genset-test', name: 'Generator Monthly Load Test', domain: 'Technical Services', topic: 'Electrical & Power',
+    owner: 'Tan Wei Ming', ownerRole: 'Senior M&E Engineer', usageCount: 31, successRate: 0.9, version: '1.1',
+    assetTypes: ['Office', 'Data Centre'], keywords: ['generator', 'genset', 'load test', 'diesel'],
+    related: ['exp-ups-window'],
+    summary: 'Running the monthly generator load test safely, including tenant notification and fuel checks.',
+    knowledge: ['Testing at <30% load causes wet stacking — always test at ≥50% using the load bank.'],
+    decisionLogic: ['Notify tenants 3 working days ahead.', 'Check fuel level ≥ 80% and coolant.', 'Run on load bank at 50–75% for 30 min.', 'Record voltage, frequency and exhaust temperature.'],
+    guardrails: ['Never transfer live tenant load during a test without Facility Manager approval.'],
+    escalation: ['Generator fails to start → Chief Engineer same day.'],
+  }),
+  mk({
+    id: 'exp-ups-window', name: 'UPS Maintenance Window Planning', domain: 'Technical Services', topic: 'Electrical & Power',
+    status: 'draft', version: '0.1', owner: 'Lim Jia Hui', ownerRole: 'Data Centre Ops Lead', assetTypes: ['Data Centre'],
+    keywords: ['ups', 'battery', 'maintenance window'], origin: 'auto-detected', reviewer: null,
+    summary: 'Choosing and communicating maintenance windows for UPS systems serving critical load.',
+    knowledge: ['Customers with N+1 contracts must be told which UPS module is out of service.'],
+    decisionLogic: ['Confirm redundancy level for affected PDUs.'],
+    guardrails: [],
+    sources: [{ type: 'conversation', chatId: 'chat-7', title: 'Data centre UPS maintenance window', excerpt: 'We never do UPS work on a Friday…', date: d('2026-09-19') }],
+  }),
+  mk({
+    id: 'exp-water-tank', name: 'Water Tank Cleaning & Shutdown', domain: 'Technical Services', topic: 'Plumbing & Water',
+    owner: 'Ahmad Rizal', ownerRole: 'Facility Executive', usageCount: 6, keywords: ['water', 'tank', 'shutdown', 'pub'],
+    related: ['exp-shutdown-notice'],
+    summary: 'Annual potable water tank cleaning, PUB requirements and minimising tenant disruption.',
+    knowledge: ['PUB requires tank cleaning and water sampling at least once a year.'],
+    decisionLogic: ['Book licensed cleaning contractor 4 weeks ahead.', 'Schedule on Saturday 7am–1pm.', 'Issue shutdown notice to tenants (see Planned Shutdown Notices).', 'Collect water sample and file report.'],
+    guardrails: ['Only PUB-licensed contractors may clean potable water tanks.'],
+  }),
+  mk({
+    id: 'exp-chiller-seq', name: 'Chiller Sequencing for Efficiency', domain: 'Energy Optimisation', topic: 'Chiller Plant Efficiency',
+    owner: 'Nurul Huda', ownerRole: 'Energy Manager', usageCount: 41, successRate: 0.87, version: '1.4',
+    assetTypes: ['Office', 'Data Centre'], keywords: ['chiller', 'sequencing', 'kw/rt', 'efficiency', 'plant'],
+    related: ['exp-chiller-fault', 'exp-energy-peak'],
+    summary: 'Staging chillers to keep the plant near its best kW/RT, especially at part load.',
+    knowledge: ['Most centrifugal chillers are most efficient at 60–80% load, not 100%.', 'Target plant efficiency for Grade-A offices: ≤0.65 kW/RT.'],
+    decisionLogic: ['Read current plant kW/RT and load per chiller.', 'If any chiller > 90% load → stage up.', 'If two chillers < 45% each → stage down one.', 'Re-check after 20 minutes of stable operation.'],
+    guardrails: ['Never stage down below N+1 redundancy in data centre plants.'],
+  }),
+  mk({
+    id: 'exp-solar-yield', name: 'Rooftop Solar Yield Check', domain: 'Energy Optimisation', topic: 'Solar & Renewables',
+    status: 'in_review', version: '0.9', owner: 'Nurul Huda', ownerRole: 'Energy Manager', assetTypes: ['Logistics', 'Office'],
+    keywords: ['solar', 'pv', 'yield', 'inverter'], reviewer: 'Daniel Koh',
+    summary: 'Spotting underperforming PV strings from monthly yield data.',
+    knowledge: ['Expected yield in Singapore is ~1,200–1,300 kWh/kWp/year.'],
+    decisionLogic: ['Compare monthly yield per inverter against the fleet median.', 'Any inverter < 85% of median → schedule panel cleaning and string test.'],
+    guardrails: ['Rooftop access requires a permit-to-work.'],
+  }),
+  mk({
+    id: 'exp-capex-priority', name: 'CAPEX Prioritisation', domain: 'Asset Operations', topic: 'Budgeting & CAPEX',
+    owner: 'Daniel Koh', ownerRole: 'Asset Manager', usageCount: 12, assetTypes: ['Office', 'Logistics', 'Data Centre', 'Retail'],
+    keywords: ['capex', 'budget', 'replacement', 'lifecycle'], related: ['exp-vendor-review'],
+    summary: 'Ranking replacement projects by risk, tenant impact and payback for the annual CAPEX plan.',
+    knowledge: ['Safety and statutory items always rank first, regardless of payback.'],
+    decisionLogic: ['Score each item: safety/statutory (0–5), tenant impact (0–5), energy payback (years).', 'Rank statutory first, then by combined score.', 'Flag any item deferred twice as high risk.'],
+    guardrails: ['Final CAPEX approval sits with the Asset Manager — Fractal only ranks.'],
+  }),
+  mk({
+    id: 'exp-vendor-review', name: 'Vendor Performance Review', domain: 'Asset Operations', topic: 'Vendor Management',
+    owner: 'Daniel Koh', ownerRole: 'Asset Manager', usageCount: 8, assetTypes: ['Office', 'Logistics'], keywords: ['vendor', 'contractor', 'sla', 'performance'],
+    summary: 'Quarterly scoring of maintenance contractors against SLA, quality and responsiveness.',
+    knowledge: ['Response time SLA breaches are a better predictor of poor service than complaint counts.'],
+    decisionLogic: ['Pull SLA response/resolution data for the quarter.', 'Score on SLA, rework rate, safety incidents.', 'Below 70% for two quarters → formal improvement notice.'],
+    guardrails: ['Do not share one vendor\'s scores with another vendor.'],
+  }),
+  mk({
+    id: 'exp-shutdown-notice', name: 'Planned Shutdown Notices', domain: 'Tenant Experience', topic: 'Communications',
+    owner: 'Jasmine Ong', ownerRole: 'Tenant Relations Lead', usageCount: 27, successRate: 0.93,
+    assetTypes: ['Office', 'Retail', 'Logistics'], keywords: ['notice', 'shutdown', 'circular', 'inform tenants'],
+    related: ['exp-water-tank', 'exp-genset-test'],
+    summary: 'Writing and timing tenant notices for planned water, power or lift shutdowns.',
+    knowledge: ['Notices sent < 3 working days ahead double the complaint rate.'],
+    decisionLogic: ['Send notice ≥ 5 working days ahead; reminder 1 day before.', 'State what, when, impact and a contact number — in that order.', 'Post in lift lobbies and send by email.'],
+    guardrails: ['Never name the contractor responsible for an outage in tenant notices.'],
+  }),
+  mk({
+    id: 'exp-rent-review', name: 'Rent Review Negotiation Prep', domain: 'Leasing', topic: 'Rent Reviews',
+    status: 'in_review', version: '0.9', owner: 'Marcus Teo', ownerRole: 'Leasing Manager', reviewer: 'Daniel Koh',
+    assetTypes: ['Office', 'Retail'], keywords: ['rent review', 'negotiation', 'market rent'],
+    related: ['exp-lease-renewal'],
+    summary: 'Preparing evidence and walk-away positions before a rent review meeting.',
+    knowledge: ['Three recent comparable transactions in the same micro-market carry more weight than broker reports.'],
+    decisionLogic: ['Collect 3–5 comparables from the last 12 months.', 'Set target, expected and walk-away rent.', 'Prepare non-rent concessions (fit-out, parking) as trade-offs.'],
+    guardrails: ['Rent figures are indicative — Leasing Manager confirms before sharing.'],
+  }),
+  mk({
+    id: 'exp-green-mark', name: 'Green Mark Recertification Checklist', domain: 'Sustainability', topic: 'Green Mark',
+    owner: 'Sarah Chen', ownerRole: 'Sustainability Lead', usageCount: 5, assetTypes: ['Office', 'Retail'],
+    keywords: ['green mark', 'bca', 'certification', 'recertification'], related: ['exp-carbon-report', 'exp-chiller-seq'],
+    summary: 'What to prepare 6 months before BCA Green Mark recertification.',
+    knowledge: ['Chiller plant efficiency evidence is the most common reason for a delayed recertification.'],
+    decisionLogic: ['Six months out: confirm plant efficiency data is complete for 12 months.', 'Three months out: appoint assessor and collect energy/water bills.', 'One month out: dry-run site walk.'],
+    guardrails: ['Submissions must be signed off by the Sustainability Lead.'],
+  }),
+]
+
+SEED_EXPERTISE.push(...EXTRA)
 
 // Pending revision proposals generated from feedback / corrections.
 export const SEED_PROPOSALS = [
