@@ -1,12 +1,17 @@
-"""Pydantic schemas — camelCase JSON matching the front-end shapes."""
+"""Pydantic schemas — camelCase JSON matching the front-end shapes,
+plus chat-stream request schemas for the Claude chat backend."""
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
+# ===========================================================================
+# CamelCase base — used by chats / expertise / proposals routers
+# ===========================================================================
 
 class CamelModel(BaseModel):
     """Base that serialises to camelCase (alias) and accepts camelCase input."""
@@ -199,3 +204,34 @@ class ProposalOut(CamelModel):
 class HealthOut(CamelModel):
     status: str
     database: str
+    claude: str
+
+
+# ===========================================================================
+# Chat-stream schemas (Claude chat backend — from origin/main)
+# ===========================================================================
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ExpertiseIn(BaseModel):
+    """The Expertise fields the system prompt needs (shape: src/data/expertise.js)."""
+
+    id: str
+    name: str
+    version: str
+    status: str
+    owner: str = ""
+    whenToUse: str = ""
+    knowledge: list[str] = []
+    decisionLogic: list[str] = []
+    guardrails: list[str] = []
+    escalation: list[str] = []
+
+
+class ChatStreamRequest(BaseModel):
+    model: str  # front-end model id, e.g. "claude-sonnet"
+    messages: list[ChatTurn] = Field(min_length=1, max_length=40)
+    expertise: list[ExpertiseIn] = Field(default=[], max_length=10)

@@ -1,15 +1,17 @@
 # --- FastAPI + DB ---
-fastapi>=0.115.0
-uvicorn[standard]>=0.31.0
-sqlmodel>=0.0.22
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
 sqlalchemy>=2.0.35
 psycopg[binary]>=3.2.3
 
 # --- Config ---
 pydantic>=2.9.2
-pydantic-settings>=2.5.2
+pydantic-settings==2.15.0
 python-dotenv>=1.0.1
 
 # --- Supabase Admin API (for seed.py creating demo users) ---
 supabase>=2.7.4
 httpx>=0.27.2
+
+# --- Claude chat (Anthropic SDK) ---
+anthropic==1.13.0

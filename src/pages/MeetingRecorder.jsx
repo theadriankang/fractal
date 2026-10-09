@@ -1,13 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Mic, Square, Pencil, Check, Copy, Paperclip, X, FileText, Image as ImageIcon, Sparkles, Loader2,
-  Trash2, ArrowLeft, ShieldCheck, Lock, CheckCircle2, AlertTriangle, History, ChevronDown,
+  Trash2, ArrowLeft, ShieldCheck, Lock, CheckCircle2, AlertTriangle, History, ChevronDown, Route, BookOpen, Plus,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useStore } from '../store'
 import { useMeetingRecorder, joinBlocks } from '../hooks/useMeetingRecorder'
 import { hasSupabase } from '../lib/supabase'
 import { ACCEPT, MAX_FILES } from '../lib/readAttachment'
 import { listMeetings } from '../lib/meetingsService'
+import { TAXONOMY } from '../data/taxonomy'
 import { Logo } from '../components/ui'
 import TopBar from '../components/TopBar'
 
@@ -296,15 +298,147 @@ function Card({ title, children }) {
   )
 }
 
+// ---------------------------------------------------------------- category selector (takeaway → Expertise)
+const FIELD_OPTS = [['knowledge', 'Knowledge'], ['decisionLogic', 'Decision logic'], ['guardrails', 'Guardrail'], ['escalation', 'Escalation']]
+const FIELD_LABEL = Object.fromEntries(FIELD_OPTS)
+const sel = 'min-w-0 rounded-lg bg-white px-2 py-1 text-xs outline-none ring-1 ring-gray-200 focus:ring-gray-400 dark:bg-gray-850 dark:ring-gray-800 dark:focus:ring-gray-600'
+
+function Confidence({ value }) {
+  if (value == null) return null
+  const [label, cls] = value >= 0.8 ? ['High', 'bg-emerald-500/15 text-emerald-400'] : value >= 0.6 ? ['Medium', 'bg-amber-500/15 text-amber-400'] : ['Low', 'bg-gray-500/15 text-gray-400']
+  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`} title={`Category selector confidence ${Math.round(value * 100)}%`}>{label} · {Math.round(value * 100)}%</span>
+}
+
+function LinkRow({ link, rec, expertise, readOnly }) {
+  const target = expertise.find((e) => e.id === link.expertiseId)
+  const isNew = !link.expertiseId
+  const set = (patch) => rec.updateLink(link.key, patch)
+
+  if (readOnly)
+    return (
+      <div className="rounded-lg bg-white px-2.5 py-2 text-xs ring-1 ring-gray-200 dark:bg-gray-850 dark:ring-gray-800">
+        <p className="flex flex-wrap items-center gap-1.5 text-gray-500">
+          <BookOpen size={12} />
+          {target ? <Link to={`/expertise/${target.id}`} className="font-medium text-gray-700 hover:underline dark:text-gray-200">{target.name}</Link>
+            : <span className="font-medium text-gray-700 dark:text-gray-200">{link.newExpertise?.name || 'New Expertise'} <span className="font-normal text-gray-500">(new)</span></span>}
+          · {FIELD_LABEL[link.field] || link.field}
+          <Confidence value={link.confidence} />
+        </p>
+        <p className="mt-1 text-gray-600 dark:text-gray-300">{link.entry}</p>
+      </div>
+    )
+
+  const domains = TAXONOMY.map((t) => ({ ...t, items: expertise.filter((e) => e.domain === t.domain) })).filter((d) => d.items.length)
+  const topics = TAXONOMY.find((t) => t.domain === link.newExpertise?.domain)?.topics || []
+  return (
+    <div className={`space-y-2 rounded-lg bg-white p-2.5 ring-1 ring-gray-200 transition dark:bg-gray-850 dark:ring-gray-800 ${link.include ? '' : 'opacity-50'}`}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <input type="checkbox" className="accent-emerald-500" checked={link.include} onChange={(e) => set({ include: e.target.checked })} title="Send to the Review Queue on approval" />
+        <select
+          className={`${sel} max-w-[220px] flex-1`}
+          value={isNew ? 'new' : link.expertiseId}
+          onChange={(e) => {
+            const v = e.target.value
+            if (v === 'new') set({ expertiseId: null, newExpertise: link.newExpertise || { name: '', domain: TAXONOMY[0].domain, topic: TAXONOMY[0].topics[0] } })
+            else set({ expertiseId: v })
+          }}
+          aria-label="Target Expertise"
+        >
+          {domains.map((d) => (
+            <optgroup key={d.domain} label={d.domain}>
+              {d.items.map((e) => <option key={e.id} value={e.id}>{e.name}{e.status !== 'approved' ? ` (${e.status.replace('_', ' ')})` : ''}</option>)}
+            </optgroup>
+          ))}
+          <option value="new">＋ New Expertise…</option>
+        </select>
+        <select className={sel} value={link.field} onChange={(e) => set({ field: e.target.value })} aria-label="Section">
+          {FIELD_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <Confidence value={link.confidence} />
+        <button className="ml-auto rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-red-400 dark:hover:bg-white/5" onClick={() => rec.removeLink(link.key)} title="Remove link"><X size={13} /></button>
+      </div>
+      {isNew && (
+        <div className="flex flex-wrap gap-1.5">
+          <input className={`${sel} flex-1`} placeholder="New Expertise name" value={link.newExpertise?.name || ''} onChange={(e) => set({ newExpertise: { ...link.newExpertise, name: e.target.value } })} />
+          <select className={sel} value={link.newExpertise?.domain} onChange={(e) => set({ newExpertise: { ...link.newExpertise, domain: e.target.value, topic: TAXONOMY.find((t) => t.domain === e.target.value).topics[0] } })}>
+            {TAXONOMY.map((t) => <option key={t.domain}>{t.domain}</option>)}
+          </select>
+          <select className={sel} value={link.newExpertise?.topic} onChange={(e) => set({ newExpertise: { ...link.newExpertise, topic: e.target.value } })}>
+            {[...new Set([...topics, link.newExpertise?.topic].filter(Boolean))].map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </div>
+      )}
+      <textarea
+        rows={2}
+        value={link.entry}
+        onChange={(e) => set({ entry: e.target.value })}
+        className="w-full resize-y rounded-md bg-gray-50 px-2 py-1.5 text-xs leading-5 outline-none ring-1 ring-transparent focus:ring-gray-400 dark:bg-gray-900 dark:focus:ring-gray-600"
+        aria-label="Line to add to the Expertise"
+      />
+      {link.rationale && <p className="text-[11px] text-gray-500">{link.rationale}</p>}
+    </div>
+  )
+}
+
+function TakeawaysCard({ rec, readOnly }) {
+  const expertise = useStore((s) => s.expertise).filter((e) => e.status !== 'deprecated')
+  const ins = rec.insights
+  const routed = rec.links.filter((l) => l.include).length
+  return (
+    <Card title="Key takeaways & decisions">
+      {ins.key_takeaways.length ? (
+        <>
+          <p className="mb-3 flex items-start gap-1.5 text-xs text-gray-500">
+            <Route size={13} className="mt-px shrink-0" />
+            {readOnly
+              ? (rec.links.length ? `${rec.links.length} takeaway link${rec.links.length > 1 ? 's' : ''} routed to Expertise.` : 'No takeaways were routed to Expertise.')
+              : 'The category selector paired reusable know-how with the Expertise it belongs to. Adjust the target or section, edit the line, and untick anything that shouldn\'t go to the Review Queue.'}
+          </p>
+          <ul className="space-y-3">
+            {ins.key_takeaways.map((t, i) => {
+              const ls = rec.links.filter((l) => l.takeawayIndex === i)
+              return (
+                <li key={i}>
+                  <p className="flex gap-2 text-sm leading-6"><span className="text-gray-500">•</span><span>{t}</span></p>
+                  {(ls.length > 0 || !readOnly) && (
+                    <div className="mt-1.5 space-y-1.5 pl-4">
+                      {ls.map((l) => <LinkRow key={l.key} link={l} rec={rec} expertise={expertise} readOnly={readOnly} />)}
+                      {!readOnly && (
+                        <button className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-300" onClick={() => rec.addLink(i)}>
+                          <Plus size={12} /> {ls.length ? 'Link to another Expertise' : 'Link to Expertise'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+          {ins.category_error && !readOnly && (
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-400"><AlertTriangle size={13} /> Category selector unavailable ({ins.category_error}). You can still link takeaways manually.</p>
+          )}
+          {!readOnly && <p className="mt-3 text-[11px] text-gray-500">{routed} link{routed === 1 ? '' : 's'} will be sent to the Review Queue when you approve. Live Expertise only changes after a Reviewer merges them.</p>}
+        </>
+      ) : <p className="text-sm text-gray-500">None identified.</p>}
+    </Card>
+  )
+}
+
 function InsightsDrawer({ rec }) {
   const [showClean, setShowClean] = useState(false)
+  const expertise = useStore((s) => s.expertise)
   const open = ['insights', 'saving', 'saved'].includes(rec.stage) && rec.insights
   if (!open) return null
   const ins = rec.insights
   const saving = rec.stage === 'saving'
   const done = rec.stage === 'saved'
   const asText = [
-    rec.title, '', 'SUMMARY', ins.summary, '', 'KEY TAKEAWAYS', ...ins.key_takeaways.map((t) => `- ${t}`), '',
+    rec.title, '', 'SUMMARY', ins.summary, '', 'KEY TAKEAWAYS',
+    ...ins.key_takeaways.flatMap((t, i) => [
+      `- ${t}`,
+      ...rec.links.filter((l) => l.takeawayIndex === i && l.include).map((l) =>
+        `    → ${l.expertiseId ? (expertise.find((e) => e.id === l.expertiseId)?.name || l.expertiseId) : `${l.newExpertise?.name || 'New Expertise'} (new)`} · ${FIELD_LABEL[l.field] || l.field}`),
+    ]), '',
     'ACTION ITEMS', ...ins.action_items.map((a) => `- ${a.task} (${a.owner}, ${a.due_date})`),
   ].join('\n')
 
@@ -325,11 +459,7 @@ function InsightsDrawer({ rec }) {
               {ins.summary.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}
             </div>
           </Card>
-          <Card title="Key takeaways & decisions">
-            {ins.key_takeaways.length ? (
-              <ul className="list-disc space-y-1.5 pl-5 text-sm leading-6">{ins.key_takeaways.map((t, i) => <li key={i}>{t}</li>)}</ul>
-            ) : <p className="text-sm text-gray-500">None identified.</p>}
-          </Card>
+          <TakeawaysCard rec={rec} readOnly={saving || done} />
           <Card title="Action items">
             {ins.action_items.length ? (
               <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
@@ -362,9 +492,19 @@ function InsightsDrawer({ rec }) {
         <footer className="space-y-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
           {rec.error && <p className="flex items-center gap-1.5 text-sm text-red-400"><AlertTriangle size={14} /> {rec.error}</p>}
           {done ? (
-            <div className="flex items-center justify-between">
-              <p className="flex items-center gap-2 text-sm text-emerald-400"><CheckCircle2 size={16} /> Approved &amp; saved to database</p>
-              <button className="btn-outline" onClick={rec.discard}>New meeting</button>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="flex items-center gap-2 text-sm text-emerald-400"><CheckCircle2 size={16} /> Approved &amp; saved to database</p>
+                <button className="btn-outline" onClick={rec.discard}>New meeting</button>
+              </div>
+              {rec.captured && (rec.captured.proposals + rec.captured.drafts > 0) && (
+                <p className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <Route size={13} />
+                  {[rec.captured.proposals && `${rec.captured.proposals} Expertise revision${rec.captured.proposals > 1 ? 's' : ''}`,
+                    rec.captured.drafts && `${rec.captured.drafts} new Expertise draft${rec.captured.drafts > 1 ? 's' : ''}`].filter(Boolean).join(' and ')} sent for review ·
+                  <Link to="/expertise/review" className="text-accent-500 hover:underline">Open Review Queue →</Link>
+                </p>
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2">

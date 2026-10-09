@@ -13,9 +13,12 @@ async function call(body) {
   return data
 }
 
-/** Step 2: send amended transcript + parsed files to Claude (via Edge Function). Nothing is stored. */
-export async function generateInsights({ transcript, files }) {
-  const { insights } = await call({ action: 'insights', transcript, files })
+/**
+ * Step 2: send amended transcript + parsed files to Claude (via Edge Function). Nothing is stored.
+ * `expertise` (catalog) and `taxonomy` feed the category selector, which returns `insights.expertise_links`.
+ */
+export async function generateInsights({ transcript, files, expertise = [], taxonomy = [] }) {
+  const { insights } = await call({ action: 'insights', transcript, files, expertise, taxonomy })
   return insights
 }
 

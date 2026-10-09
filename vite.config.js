@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     port: 5173,
     open: true,
+    // FastAPI backend (backend/README.md)
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

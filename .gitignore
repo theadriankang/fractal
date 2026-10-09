@@ -6,10 +6,12 @@ dist
 .env.local
 !.env.example
 *.swp
+
 supabase/.temp/
 
-# Python
+# Python / Backend
 .venv/
+backend/.venv
 venv/
 __pycache__/
 *.pyc

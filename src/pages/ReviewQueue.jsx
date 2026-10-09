@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Check, X, Sparkles, GitPullRequestArrow, FileEdit, ShieldAlert, MessageSquare } from 'lucide-react'
+import { Check, X, Sparkles, GitPullRequestArrow, FileEdit, ShieldAlert, MessageSquare, Mic } from 'lucide-react'
 import { useStore } from '../store'
 import { domainGradient } from '../data/taxonomy'
 import { Breadcrumb } from './ExpertiseLayout'
@@ -48,6 +48,7 @@ function ProposalCard({ p }) {
             ))}
           </div>
           {p.chatId && <Link to={`/c/${p.chatId}`} className="mt-2 inline-block text-xs text-accent-500 hover:underline">View source conversation →</Link>}
+          {p.meetingTitle && <p className="mt-2 flex items-center gap-1.5 text-xs text-gray-500"><Mic size={12} /> From meeting: {p.meetingTitle} · <Link to="/meetings" className="text-accent-500 hover:underline">Meeting Recorder →</Link></p>}
         </div>
         <div className="flex shrink-0 gap-1.5">
           <button className="btn-outline" disabled={!canReview} onClick={() => rejectProposal(p.id)}><X size={15} /> Reject</button>
@@ -73,7 +74,7 @@ function DraftCard({ e }) {
             <StatusBadge status={e.status} />
           </div>
           <p className="text-xs text-gray-500">
-            {e.domain} › {e.topic} · {e.origin === 'auto-detected' ? 'Auto-detected from a conversation' : `Created by ${e.owner}`} · {timeAgo(e.updatedAt)}
+            {e.domain} › {e.topic} · {e.origin === 'auto-detected' ? `Auto-detected from a ${e.sources?.[0]?.type === 'meeting' ? 'meeting' : 'conversation'}` : `Created by ${e.owner}`} · {timeAgo(e.updatedAt)}
           </p>
           <p className="mt-2 line-clamp-2 text-sm text-gray-600 dark:text-gray-400">{e.summary}</p>
           <div className="mt-2 flex gap-4 text-xs text-gray-500">
