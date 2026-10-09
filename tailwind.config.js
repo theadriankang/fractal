@@ -20,8 +20,12 @@ export default {
       keyframes: {
         fadeIn: { from: { opacity: 0, transform: 'translateY(4px)' }, to: { opacity: 1, transform: 'none' } },
         blink: { '50%': { opacity: 0 } },
+        recGlow: {
+          '0%, 100%': { boxShadow: '0 0 0 0 rgba(239,68,68,.55), 0 0 24px 4px rgba(239,68,68,.35)' },
+          '50%': { boxShadow: '0 0 0 14px rgba(239,68,68,0), 0 0 48px 12px rgba(239,68,68,.25)' },
+        },
       },
-      animation: { fadeIn: 'fadeIn .25s ease-out', blink: 'blink 1s step-end infinite' },
+      animation: { fadeIn: 'fadeIn .25s ease-out', blink: 'blink 1s step-end infinite', recGlow: 'recGlow 1.8s ease-in-out infinite' },
     },
   },
   plugins: [typography],

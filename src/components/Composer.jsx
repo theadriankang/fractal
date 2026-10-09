@@ -4,7 +4,10 @@ import { useStore } from '../store'
 import { routeAuto, getModel } from '../data/models'
 import { ProviderIcon } from './ui'
 
-export default function Composer({ onSend, streaming, onStop, autoFocus = true, initialAttached = [] }) {
+export default function Composer({
+  onSend, streaming, onStop, autoFocus = true, initialAttached = [],
+  showRouting = true, allowExpertise = true, placeholder = 'Ask anything — type # to attach Expertise',
+}) {
   const { expertise, selectedModels } = useStore()
   const [text, setText] = useState('')
   const [files, setFiles] = useState([])
@@ -33,7 +36,7 @@ export default function Composer({ onSend, streaming, onStop, autoFocus = true, 
 
   const onChange = (v) => {
     setText(v)
-    const m = v.match(/(?:^|\s)#([\w-]*)$/)
+    const m = allowExpertise && v.match(/(?:^|\s)#([\w-]*)$/)
     if (m) { setPicker({ query: m[1] }); setPickIdx(0) } else setPicker(null)
   }
 
@@ -60,7 +63,7 @@ export default function Composer({ onSend, streaming, onStop, autoFocus = true, 
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
-  const route = selectedModels.length === 1 && selectedModels[0] === 'auto' && text.trim().length > 6 ? routeAuto(text) : null
+  const route = showRouting && selectedModels.length === 1 && selectedModels[0] === 'auto' && text.trim().length > 6 ? routeAuto(text) : null
   const routed = route && getModel(route.modelId)
 
   return (
@@ -110,7 +113,7 @@ export default function Composer({ onSend, streaming, onStop, autoFocus = true, 
           value={text}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Ask anything — type # to attach Expertise"
+          placeholder={placeholder}
           className="w-full resize-none bg-transparent px-2 text-[15px] leading-6 outline-none placeholder:text-gray-400"
         />
 
@@ -129,12 +132,14 @@ export default function Composer({ onSend, streaming, onStop, autoFocus = true, 
           >
             <Globe size={14} /> Web search
           </button>
+          {allowExpertise && (
           <button
             className="btn rounded-full px-2.5 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
             onClick={() => { onChange(text + (text && !text.endsWith(' ') ? ' #' : '#')); ta.current.focus() }}
           >
             <BookOpenCheck size={14} /> Expertise
           </button>
+          )}
 
           <div className="ml-auto flex items-center gap-1">
             {routed && (
