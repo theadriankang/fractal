@@ -55,7 +55,7 @@ function ChatItem({ chat }) {
           <button className="menu-item" onClick={() => setEditing(true)}><Pencil size={15} /> Rename</button>
           <button
             className="menu-item text-red-500"
-            onClick={() => { deleteChat(chat.id); if (active) navigate('/chat') }}
+            onClick={() => { deleteChat(chat.id); if (active) navigate('/') }}
           >
             <Trash2 size={15} /> Delete
           </button>
@@ -103,7 +103,7 @@ export default function Sidebar() {
     <aside className="flex h-full w-[260px] shrink-0 flex-col bg-gray-50 dark:bg-gray-950">
       {/* header */}
       <div className="flex items-center justify-between px-3 pb-1 pt-3">
-        <button className="flex items-center gap-2 rounded-lg px-1 py-1" onClick={() => navigate('/chat')}>
+        <button className="flex items-center gap-2 rounded-lg px-1 py-1" onClick={() => navigate('/')}>
           <Logo size={26} />
           <span className="text-[15px] font-semibold tracking-tight">Fractal</span>
         </button>
@@ -182,7 +182,7 @@ export default function Sidebar() {
             <ShieldCheck size={15} /> Reviewer {user.role === 'reviewer' && '✓'}
           </button>
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
-          <button className="menu-item" onClick={() => { resetDemo(); navigate('/chat') }}><RotateCcw size={15} /> Reset demo data</button>
+          <button className="menu-item" onClick={() => { resetDemo(); navigate('/') }}><RotateCcw size={15} /> Reset demo data</button>
         </Dropdown>
       </div>
     </aside>

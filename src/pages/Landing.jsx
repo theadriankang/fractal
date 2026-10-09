@@ -46,7 +46,7 @@ function useReveal(ref) {
 
 function PrimaryCta() {
   return (
-    <Link to="/chat" className="btn-primary px-5 py-2.5 text-[15px] active:scale-[0.98]">
+    <Link to="/" className="btn-primary px-5 py-2.5 text-[15px] active:scale-[0.98]">
       Open workspace <ArrowRight size={16} strokeWidth={2} />
     </Link>
   )
@@ -56,7 +56,7 @@ function Nav() {
   return (
     <header className="sticky top-0 z-20 border-b border-gray-200/70 bg-gray-50/80 backdrop-blur dark:border-gray-800/70 dark:bg-gray-950/80">
       <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 md:px-8">
-        <Link to="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
+        <Link to="/welcome" className="flex items-center gap-2.5 font-semibold tracking-tight">
           <img src="/fractal.svg" alt="" className="h-7 w-7 grayscale" />
           Fractal
         </Link>
@@ -66,7 +66,7 @@ function Nav() {
             <a href="#expertise" className="btn-ghost">Expertise</a>
             <a href="#models" className="btn-ghost">Models</a>
           </div>
-          <Link to="/chat" className="btn-primary ml-2 active:scale-[0.98]">Open workspace</Link>
+          <Link to="/" className="btn-primary ml-2 active:scale-[0.98]">Open workspace</Link>
         </div>
       </nav>
     </header>

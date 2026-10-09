@@ -368,7 +368,7 @@ export default function ExpertiseDetail() {
                   <button className="btn-accent" disabled={!isReviewer} onClick={() => approveExpertise(e.id, 'Initial approval')} title={!isReviewer ? 'Reviewer only' : ''}><Check size={14} /> Approve</button>
                 )}
                 {e.status === 'approved' && (
-                  <button className="btn-primary" onClick={() => navigate('/chat', { state: { attach: e.id } })}><MessageSquarePlus size={14} /> Use in chat</button>
+                  <button className="btn-primary" onClick={() => navigate('/', { state: { attach: e.id } })}><MessageSquarePlus size={14} /> Use in chat</button>
                 )}
                 <Dropdown align="right" trigger={() => <button className="btn-ghost px-2">•••</button>}>
                   {e.status === 'approved' && <button className="menu-item" disabled={!isReviewer} onClick={() => deprecateExpertise(e.id)}><Archive size={15} /> Deprecate</button>}
