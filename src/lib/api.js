@@ -1,15 +1,53 @@
 // ---------------------------------------------------------------------------
 // Backend client (FastAPI in /backend, proxied at /api by vite.config.js).
-// Only Claude models are served by the backend so far; every other model, and
-// everything when VITE_USE_MOCK=true, keeps using src/lib/mockApi.js.
+// Live models come from GET /api/models; unavailable models (and everything
+// when VITE_USE_MOCK=true) keep using src/lib/mockApi.js.
 // ---------------------------------------------------------------------------
 
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
-const BACKEND_MODELS = new Set(['claude-opus', 'claude-sonnet', 'claude-haiku'])
+// Filled from GET /api/models on first load. Unavailable models keep the
+// existing mock fallback so the front end always works, even with no keys.
+let _liveModels = new Set()
+let _fetched = false
+let _retryTimer = null
+let _lastRetry = 0
+const _RETRY_MS = 10_000
+
+async function refreshLiveModels() {
+  if (_fetched) return
+  try {
+    const res = await fetch('/api/models')
+    if (res.ok) {
+      const list = await res.json()
+      _liveModels = new Set(list.filter((m) => m.available).map((m) => m.id))
+      _fetched = true
+    }
+  } catch {
+    // Backend offline — leave _liveModels empty; isLive returns false.
+  }
+}
+
+// Kick off the fetch eagerly (fire-and-forget).
+refreshLiveModels()
 
 /** True when this model's answers come from the backend rather than the mock. */
-export const isLive = (modelId) => !USE_MOCK && BACKEND_MODELS.has(modelId)
+export function isLive(modelId) {
+  if (USE_MOCK) return false
+  if (!_fetched) {
+    // Throttle retries so a late-starting backend eventually serves real models.
+    const now = Date.now()
+    if (now - _lastRetry >= _RETRY_MS) {
+      _lastRetry = now
+      clearTimeout(_retryTimer)
+      _retryTimer = setTimeout(() => { refreshLiveModels() }, 0)
+    }
+  }
+  return _liveModels.has(modelId)
+}
+
+/** Re-fetch the live model list from the backend (returns a promise). */
+export { refreshLiveModels }
 
 /**
  * Know-how capture: POST /api/expertise/extract (see src/lib/capture.js for the request/response).

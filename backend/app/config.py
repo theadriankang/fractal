@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     # Thinking depth for chat answers: low | medium | high | xhigh | max.
     claude_effort: str = "medium"
 
+    # Multi-model routing (backend/app/llm/registry.py)
+    # OpenRouter for all non-Claude models (unless Hunyuan override applies).
+    openrouter_api_key: str = ""
+    # Hunyuan OpenAI-compatible endpoint override (when set, Hunyuan models
+    # go direct instead of through OpenRouter).
+    hunyuan_api_key: str = ""
+    hunyuan_base_url: str = ""
+
     # Know-how capture from chat (POST /api/expertise/extract)
     extraction_model: str = "claude-haiku-5-5"
     extraction_threshold: float = 0.6  # below this confidence, nothing is proposed
