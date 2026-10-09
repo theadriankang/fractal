@@ -2,7 +2,7 @@
 
 from html import escape
 
-from .schemas import ExpertiseIn
+from .schemas import ExpertiseIn, RoutingIn
 
 INTRO = "You are Fractal, an operations assistant for commercial real estate teams (offices, data centres, logistics, retail)."
 
@@ -41,10 +41,58 @@ def _block(e: ExpertiseIn) -> str:
     return "\n".join(lines)
 
 
-def build_system_prompt(expertise: list[ExpertiseIn]) -> str:
-    """Callers must pass approved Expertise only (PROJECT_CONTEXT rule 4)."""
+def _routing_reason(routing: RoutingIn | None, model_display_name: str) -> str:
+    """Human-readable explanation of why this model is answering."""
+    if routing is None or routing.selectedBy == "user":
+        return f"The user picked {model_display_name} in the model selector."
+    # Auto routing
+    category = routing.category or "general"
+    reason = routing.reason or "best fit"
+    return f"Fractal's Auto router chose {model_display_name} because it detected a {category.lower()} task ({reason})."
+
+
+def _transparency_section(
+    model_display_name: str,
+    provider_name: str,
+    provider_model: str,
+    routing: RoutingIn | None,
+) -> str:
+    """'About this answer' block the model sees so it can answer honestly when asked."""
+    why = _routing_reason(routing, model_display_name)
+    return (
+        f"About this answer:\n"
+        f"- You are Fractal, an assistant running on {model_display_name} "
+        f"({provider_name}, model: {provider_model}).\n"
+        f"- {why}\n"
+        f"- If the user asks which model or AI is answering, or why this model was chosen, "
+        f"answer honestly: name {model_display_name}, the provider ({provider_name}), "
+        f"and the reason above. Be brief and factual.\n"
+        f"- Only mention the model and the reason when the user asks about the model, "
+        f"the AI, or why it was chosen. Do not volunteer this information otherwise.\n"
+        f"- Never claim to be a different model or provider."
+    )
+
+
+def build_system_prompt(
+    expertise: list[ExpertiseIn],
+    *,
+    model_display_name: str = "",
+    provider_name: str = "",
+    provider_model: str = "",
+    routing: RoutingIn | None = None,
+) -> str:
+    """Callers must pass approved Expertise only (PROJECT_CONTEXT rule 4).
+
+    Optional model metadata and routing build a transparency section so the
+    model can honestly answer "which model is this?" when asked.
+    """
     if expertise:
         body = "\n\n".join([GROUNDED, *(_block(e) for e in expertise), GROUNDED_RULES])
     else:
         body = UNGROUNDED
-    return "\n\n".join([INTRO, body, ALWAYS])
+
+    sections = [INTRO, body]
+    if model_display_name:
+        sections.append(_transparency_section(model_display_name, provider_name, provider_model, routing))
+    sections.append(ALWAYS)
+    return "\n\n".join(sections)
