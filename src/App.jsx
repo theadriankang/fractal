@@ -8,6 +8,7 @@ import ExpertiseLayout from './pages/ExpertiseLayout'
 import ExpertiseHome, { ExpertiseDomain } from './pages/ExpertiseHome'
 import ExpertiseDetail from './pages/ExpertiseDetail'
 import ReviewQueue from './pages/ReviewQueue'
+import Landing from './pages/Landing'
 
 function Toast() {
   const toast = useStore((s) => s.toast)
@@ -19,19 +20,8 @@ function Toast() {
   )
 }
 
-export default function App() {
-  const { sidebarOpen, settings } = useStore()
-
-  useEffect(() => {
-    const apply = () => {
-      const dark = settings.theme === 'dark' || (settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
-      document.documentElement.classList.toggle('dark', dark)
-    }
-    apply()
-    const mq = matchMedia('(prefers-color-scheme: dark)')
-    mq.addEventListener('change', apply)
-    return () => mq.removeEventListener('change', apply)
-  }, [settings.theme])
+function Shell() {
+  const { sidebarOpen } = useStore()
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -52,7 +42,31 @@ export default function App() {
         </Routes>
       </main>
       <SettingsModal />
-      <Toast />
     </div>
+  )
+}
+
+export default function App() {
+  const { settings } = useStore()
+
+  useEffect(() => {
+    const apply = () => {
+      const dark = settings.theme === 'dark' || (settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+      document.documentElement.classList.toggle('dark', dark)
+    }
+    apply()
+    const mq = matchMedia('(prefers-color-scheme: dark)')
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [settings.theme])
+
+  return (
+    <>
+      <Routes>
+        <Route path="/welcome" element={<Landing />} />
+        <Route path="/*" element={<Shell />} />
+      </Routes>
+      <Toast />
+    </>
   )
 }
