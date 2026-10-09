@@ -6,4 +6,7 @@ dist
 .env.local
 !.env.example
 *.swp
-supabase/.temp/
+
+# Backend
+backend/.venv
+__pycache__/

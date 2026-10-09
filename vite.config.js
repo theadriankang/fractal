@@ -3,5 +3,10 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  server: { port: 5173, open: true },
+  server: {
+    port: 5173,
+    open: true,
+    // FastAPI backend (backend/README.md)
+    proxy: { '/api': 'http://localhost:8000' },
+  },
 })
