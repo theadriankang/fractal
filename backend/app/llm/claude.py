@@ -32,6 +32,8 @@ async def stream_reply(model_key: str, system: str, messages: list[dict]) -> Asy
         "system": system,
         "messages": messages,
         "output_config": {"effort": settings.claude_effort},
+        # Caches the conversation prefix, so attached documents resent on later turns bill at cache-read rates.
+        "cache_control": {"type": "ephemeral"},
     }
     if spec["fallbacks"]:
         params |= {"betas": [FALLBACK_BETA], "fallbacks": "default"}

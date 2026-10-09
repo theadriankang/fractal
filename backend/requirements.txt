@@ -19,3 +19,8 @@ anthropic==1.13.0
 # --- Multi-model chat (OpenRouter + OpenAI-compatible providers) ---
 litellm>=1.74.0
 PyYAML>=6.0.2
+
+# --- Chat attachments (POST /api/files) ---
+pypdf==6.20.0
+python-docx==1.2.0
+python-multipart==0.0.32

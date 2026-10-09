@@ -214,6 +214,7 @@ class HealthOut(CamelModel):
 class ChatTurn(BaseModel):
     role: Literal["user", "assistant"]
     content: str
+    files: list[str] = Field(default=[], max_length=5)  # ids from POST /api/files (user turns)
 
 
 class ExpertiseIn(BaseModel):

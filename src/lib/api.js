@@ -72,6 +72,35 @@ export async function extractKnowhow(body, { timeoutMs = 20000 } = {}) {
   }
 }
 
+// Chat attachments. Limits match backend/app/files.py.
+export const FILE_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg'
+export const MAX_FILES = 5
+export const MAX_FILE_BYTES = 10 * 1024 * 1024
+
+/** Returns an error message for a file the backend would reject, or null. */
+export function checkFile(file) {
+  const ext = '.' + file.name.toLowerCase().split('.').pop()
+  if (!FILE_ACCEPT.split(',').includes(ext)) return 'Unsupported type'
+  if (file.size > MAX_FILE_BYTES) return 'Larger than 10 MB'
+  if (!file.size) return 'Empty file'
+  return null
+}
+
+/** POST /api/files: stores one attachment. Resolves to {id, name, size, kind, mediaType, chars, pages}. */
+export async function uploadFile(file) {
+  const body = new FormData()
+  body.append('file', file)
+  let res
+  try {
+    res = await fetch('/api/files', { method: 'POST', body })
+  } catch {
+    throw new Error('Backend offline')
+  }
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `Upload failed (${res.status})`)
+  return data
+}
+
 // The Expertise fields the backend's system prompt uses.
 const EXPERTISE_FIELDS = ['id', 'name', 'version', 'status', 'owner', 'whenToUse', 'knowledge', 'decisionLogic', 'guardrails', 'escalation']
 const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, e[f]]))

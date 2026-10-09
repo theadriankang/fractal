@@ -53,7 +53,8 @@ function historyBefore(chat, msgId, modelId) {
   return chat.messages
     .slice(0, end)
     .map((m) => {
-      if (m.role === 'user') return { role: 'user', content: m.content }
+      // Attachments travel as ids; the backend re-reads them for every turn.
+      if (m.role === 'user') return { role: 'user', content: m.content, files: (m.files || []).filter((f) => f.id).map((f) => f.id) }
       const r = m.responses.find((x) => x.modelId === modelId && x.content) || m.responses.find((x) => x.content)
       return { role: 'assistant', content: r?.content || '' }
     })

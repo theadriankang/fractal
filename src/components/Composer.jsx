@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, Plus, BookOpenCheck, Mic, X, FileText, Sparkles, Hash } from 'lucide-react'
+import { ArrowUp, Square, Plus, BookOpenCheck, Mic, X, FileText, Sparkles, Hash, Loader2, AlertCircle } from 'lucide-react'
 import { useStore } from '../store'
+import { USE_MOCK, FILE_ACCEPT, MAX_FILES, checkFile, uploadFile } from '../lib/api'
 import { routeAuto, getModel } from '../data/models'
 import { ProviderIcon } from './ui'
 
@@ -10,7 +11,7 @@ export default function Composer({
 }) {
   const { expertise, selectedModels } = useStore()
   const [text, setText] = useState('')
-  const [files, setFiles] = useState([])
+  const [files, setFiles] = useState([]) // { key, name, size, status: 'uploading' | 'ready' | 'error', id?, kind?, error? }
   const [attached, setAttached] = useState(initialAttached)
   const [picker, setPicker] = useState(null) // null | { query }
   const [pickIdx, setPickIdx] = useState(0)
@@ -46,9 +47,29 @@ export default function Composer({
     ta.current?.focus()
   }
 
+  // Each file uploads as soon as it is picked; the message only keeps the returned id.
+  const updateFile = (key, patch) => setFiles((fs) => fs.map((f) => (f.key === key ? { ...f, ...patch } : f)))
+  const addFiles = (list) => {
+    const room = MAX_FILES - files.length
+    const added = [...list].map((file, i) => {
+      const key = Math.random().toString(36).slice(2)
+      const error = i >= room ? `Max ${MAX_FILES} files` : checkFile(file)
+      const entry = { key, name: file.name, size: file.size, status: error ? 'error' : USE_MOCK ? 'ready' : 'uploading', error }
+      if (entry.status === 'uploading') {
+        uploadFile(file)
+          .then((meta) => updateFile(key, { status: 'ready', id: meta.id, kind: meta.kind }))
+          .catch((e) => updateFile(key, { status: 'error', error: e.message }))
+      }
+      return entry
+    })
+    setFiles((fs) => [...fs, ...added])
+  }
+  const uploading = files.some((f) => f.status === 'uploading')
+  const failed = files.some((f) => f.status === 'error')
+
   const send = () => {
-    if (!text.trim() || streaming) return
-    onSend(text.trim(), { attachedExpertise: attached, files })
+    if (!text.trim() || streaming || uploading || failed) return
+    onSend(text.trim(), { attachedExpertise: attached, files: files.map(({ id, name, size, kind }) => ({ id, name, size, kind })) })
     setText(''); setFiles([]); setAttached([])
   }
 
@@ -96,10 +117,15 @@ export default function Composer({
                 </span>
               )
             })}
-            {files.map((f, i) => (
-              <span key={i} className="flex items-center gap-1.5 rounded-lg bg-white py-1 pl-2 pr-1 text-xs ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
-                <FileText size={13} /> {f.name}
-                <button className="rounded p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700" onClick={() => setFiles((a) => a.filter((_, k) => k !== i))}><X size={12} /></button>
+            {files.map((f) => (
+              <span
+                key={f.key}
+                title={f.error || (f.status === 'uploading' ? 'Uploading…' : f.name)}
+                className={`flex items-center gap-1.5 rounded-lg bg-white py-1 pl-2 pr-1 text-xs ring-1 dark:bg-gray-800 ${f.status === 'error' ? 'text-red-500 ring-red-500/40' : 'ring-gray-200 dark:ring-gray-700'}`}
+              >
+                {f.status === 'uploading' ? <Loader2 size={13} className="animate-spin" /> : f.status === 'error' ? <AlertCircle size={13} /> : <FileText size={13} />}
+                {f.name}{f.status === 'error' && <span className="max-w-[16rem] truncate">· {f.error}</span>}
+                <button className="rounded p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700" onClick={() => setFiles((a) => a.filter((x) => x.key !== f.key))} title="Remove"><X size={12} /></button>
               </span>
             ))}
           </div>
@@ -122,7 +148,8 @@ export default function Composer({
             type="file"
             multiple
             hidden
-            onChange={(e) => { setFiles((f) => [...f, ...[...e.target.files].map((x) => ({ name: x.name, size: x.size }))]); e.target.value = '' }}
+            accept={FILE_ACCEPT}
+            onChange={(e) => { addFiles(e.target.files); e.target.value = '' }}
           />
           <button className="icon-btn" title="Attach files" onClick={() => fileRef.current.click()}><Plus size={18} /></button>
           {allowExpertise && (
@@ -149,9 +176,9 @@ export default function Composer({
             ) : (
               <button
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-900 text-white transition disabled:bg-gray-300 dark:bg-white dark:text-gray-900 dark:disabled:bg-gray-700 dark:disabled:text-gray-500"
-                disabled={!text.trim()}
+                disabled={!text.trim() || uploading || failed}
                 onClick={send}
-                title="Send"
+                title={uploading ? 'Waiting for files to upload' : failed ? 'Remove the files that failed to upload' : 'Send'}
               >
                 <ArrowUp size={17} />
               </button>
