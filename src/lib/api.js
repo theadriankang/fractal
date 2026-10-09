@@ -24,10 +24,17 @@ function _authHeaders(extra = {}) {
 // Filled from GET /api/models on first load. Unavailable models keep the
 // existing mock fallback so the front end always works, even with no keys.
 let _liveModels = new Set()
+let _allBackendModels = new Map() // id → { id, provider, available }
 let _fetched = false
 let _retryTimer = null
 let _lastRetry = 0
 const _RETRY_MS = 10_000
+const _modelListeners = new Set()
+
+function _notifyModelListeners() {
+  _snapshot++
+  _modelListeners.forEach((fn) => fn())
+}
 
 async function refreshLiveModels() {
   if (_fetched) return
@@ -35,8 +42,10 @@ async function refreshLiveModels() {
     const res = await fetch('/api/models')
     if (res.ok) {
       const list = await res.json()
+      _allBackendModels = new Map(list.map((m) => [m.id, m]))
       _liveModels = new Set(list.filter((m) => m.available).map((m) => m.id))
       _fetched = true
+      _notifyModelListeners()
     }
   } catch {
     // Backend offline — leave _liveModels empty; isLive returns false.
@@ -59,6 +68,22 @@ export function isLive(modelId) {
     }
   }
   return _liveModels.has(modelId)
+}
+
+/** True when the backend reports this model as unavailable (needs a key). */
+export function isModelUnavailable(modelId) {
+  if (USE_MOCK || !_fetched) return false
+  return _allBackendModels.has(modelId) && !_liveModels.has(modelId)
+}
+
+/** Snapshot for useSyncExternalStore — increments when availability changes. */
+let _snapshot = 0
+export function modelsSnapshot() { return _snapshot }
+
+/** Subscribe to model availability changes. Returns an unsubscribe function. */
+export function subscribeToModels(fn) {
+  _modelListeners.add(fn)
+  return () => _modelListeners.delete(fn)
 }
 
 /** Re-fetch the live model list from the backend (returns a promise). */

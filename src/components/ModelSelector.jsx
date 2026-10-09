@@ -1,8 +1,14 @@
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { ChevronDown, Check, Plus, X, Search, Sparkles, Zap, Coins } from 'lucide-react'
 import { useStore } from '../store'
 import { MODELS, PROVIDERS, getModel } from '../data/models'
+import { isModelUnavailable, subscribeToModels, modelsSnapshot } from '../lib/api'
 import { ProviderIcon, useClickOutside } from './ui'
+
+// Re-renders when the backend model availability list is fetched.
+function useModelAvailability() {
+  return useSyncExternalStore(subscribeToModels, modelsSnapshot, () => 0)
+}
 
 function Dots({ n, icon: Icon, title }) {
   return (
@@ -22,6 +28,7 @@ function Picker({ value, onChange, onRemove }) {
   const ref = useClickOutside(() => setOpen(false))
   const connections = useStore((s) => s.settings.connections)
   const model = getModel(value)
+  useModelAvailability() // re-render when backend model list is fetched
 
   const list = MODELS.filter(
     (m) =>
@@ -81,16 +88,19 @@ function Picker({ value, onChange, onRemove }) {
                 <p className="px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-gray-500">
                   {p.name} {!connections[p.id]?.enabled && <span className="normal-case text-red-400">· disabled</span>}
                 </p>
-                {list.filter((m) => m.provider === p.id).map((m) => (
+                {list.filter((m) => m.provider === p.id).map((m) => {
+                  const unavailable = isModelUnavailable(m.id)
+                  return (
                   <button
                     key={m.id}
-                    disabled={!connections[p.id]?.enabled}
+                    disabled={!connections[p.id]?.enabled || unavailable}
                     className="menu-item disabled:opacity-40"
+                    title={unavailable ? 'Add a key in backend/.env' : undefined}
                     onClick={() => pick(m.id)}
                   >
                     <ProviderIcon providerId={p.id} size={20} />
                     <span className="flex-1">
-                      <span className="block font-medium">{m.name}</span>
+                      <span className="block font-medium">{m.name}{unavailable && <span className="ml-1 text-[11px] text-gray-400">· no key</span>}</span>
                       <span className="flex items-center gap-2 text-[11px] text-gray-500">
                         {m.tags.slice(0, 3).join(' · ')} <span className="text-gray-400">· {m.context}</span>
                       </span>
@@ -101,7 +111,8 @@ function Picker({ value, onChange, onRemove }) {
                     </span>
                     {value === m.id && <Check size={16} />}
                   </button>
-                ))}
+                  )
+                })}
               </div>
             ))}
             {list.length === 0 && <p className="p-4 text-center text-sm text-gray-500">No models match</p>}
