@@ -1,18 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { Mic, Square, Pencil, Check, CloudOff, Cloud, Loader2, RotateCcw, Lock, Copy, Sparkles, History, Trash2 } from 'lucide-react'
+import {
+  Mic, Square, Pencil, Check, Copy, Paperclip, X, FileText, Image as ImageIcon, Sparkles, Loader2,
+  Trash2, ArrowLeft, ShieldCheck, Lock, CheckCircle2, AlertTriangle, History, ChevronDown,
+} from 'lucide-react'
 import { useStore } from '../store'
 import { useMeetingRecorder, joinBlocks } from '../hooks/useMeetingRecorder'
 import { hasSupabase } from '../lib/supabase'
-import { listMeetings, deleteMeeting } from '../lib/meetingsService'
-import { streamText } from '../lib/mockApi'
+import { ACCEPT, MAX_FILES } from '../lib/readAttachment'
+import { listMeetings } from '../lib/meetingsService'
 import { Logo } from '../components/ui'
 import TopBar from '../components/TopBar'
-import Composer from '../components/Composer'
 
 const fmt = (s) => [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((n) => String(n).padStart(2, '0')).join(':')
 const panel = 'rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-850'
+const kb = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
 // ---------------------------------------------------------------- waveform
 function Waveform({ analyser, active }) {
@@ -51,7 +52,7 @@ function Waveform({ analyser, active }) {
 
 // ---------------------------------------------------------------- record control
 function RecordControl({ rec }) {
-  const recording = rec.status === 'recording'
+  const recording = rec.stage === 'recording'
   return (
     <div className={`${panel} flex flex-col items-center gap-4 px-6 py-7`}>
       <button
@@ -64,7 +65,7 @@ function RecordControl({ rec }) {
         {recording ? <Square size={30} fill="currentColor" /> : <Mic size={36} />}
       </button>
       <div className="text-center">
-        <p className="text-sm font-medium">{recording ? 'Stop Recording' : rec.status === 'done' ? 'Record again' : 'Start Recording'}</p>
+        <p className="text-sm font-medium">{recording ? 'Stop Recording' : rec.stage === 'saved' ? 'Record new meeting' : 'Start Recording'}</p>
         <p className="mt-1 flex items-center justify-center gap-2 font-mono text-2xl tabular-nums tracking-wider">
           {recording && <span className="h-2 w-2 rounded-full bg-red-500 animate-blink" />}
           {fmt(rec.elapsed)}
@@ -126,7 +127,7 @@ function Block({ block, editing, onEdit, onSave, onCancel }) {
 
 function Transcript({ rec }) {
   const scroller = useRef(null)
-  const recording = rec.status === 'recording'
+  const recording = rec.stage === 'recording'
   // follow the live text unless the user scrolled up or is editing
   useEffect(() => {
     const el = scroller.current
@@ -175,153 +176,235 @@ function Transcript({ rec }) {
   )
 }
 
-// ---------------------------------------------------------------- post-meeting assistant (mock, local)
-const ACTION = /\b(will|need to|needs to|action|follow[- ]?up|by (monday|tuesday|wednesday|thursday|friday|next week|eod|tomorrow)|deadline|assign|todo|to-do)\b/i
-
-function summarise(blocks) {
-  const sentences = blocks.flatMap((b) => b.text.split(/(?<=[.!?])\s+/)).filter((s) => s.trim().length > 12)
-  const key = blocks.map((b) => b.text.split(/(?<=[.!?])\s+/)[0]).filter(Boolean).slice(0, 6)
-  const actions = sentences.filter((s) => ACTION.test(s)).slice(0, 8)
-  const words = blocks.reduce((n, b) => n + b.text.split(/\s+/).length, 0)
-  // blank lines between blocks so Markdown keeps headings, meta line and lists separate
-  return [
-    `### Meeting summary`,
-    `*${blocks.length} paragraphs · ~${words} words*`,
-    `**Key points**`,
-    key.map((k) => `- ${k}`).join('\n'),
-    `**Action items**`,
-    (actions.length ? actions.map((a) => `- [ ] ${a}`) : ['- _No explicit action items detected._']).join('\n'),
-  ].join('\n\n')
-}
-
-function runCommand(text, rec) {
-  const replace = text.match(/^(?:replace|change)\s+["“]?(.+?)["”]?\s+(?:with|to)\s+["“]?(.+?)["”]?$/i)
-  if (replace) {
-    const [, from, to] = replace
-    const re = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
-    const hits = rec.blocks.reduce((n, b) => n + (b.text.match(re)?.length || 0), 0)
-    if (!hits) return `I couldn't find **"${from}"** in the transcript.`
-    rec.replaceTranscript(joinBlocks(rec.blocks).replace(re, to))
-    return `Replaced **${hits}** occurrence${hits > 1 ? 's' : ''} of "${from}" with "${to}". Changes auto-saved.`
-  }
-  const rename = text.match(/^(?:rename|title)(?:\s+(?:it|meeting|this))?\s+(?:to|as)?\s*["“]?(.+?)["”]?$/i)
-  if (rename) { rec.setTitle(rename[1]); return `Renamed the meeting to **${rename[1]}**.` }
-  if (/summar|recap|tl;?dr|key points|minutes/i.test(text)) return summarise(rec.blocks)
-  if (/action|todo|to-do|next steps/i.test(text)) return summarise(rec.blocks).split('**Action items**')[1].trim()
-  return [
-    'I can work with this transcript. Try:',
-    '- **"Summarise the meeting"** — key points + action items',
-    '- **"List the action items"**',
-    '- **"Replace Kepel with Keppel"** — fix a misheard word everywhere',
-    '- **"Rename to Chiller plant review"**',
-  ].join('\n')
-}
-
-function MeetingChat({ rec }) {
-  const [turns, setTurns] = useState([])
-  const [streaming, setStreaming] = useState(false)
-  const cancel = useRef(null)
-  const bottom = useRef(null)
-  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }) }, [turns])
-  useEffect(() => { if (rec.status !== 'done') setTurns([]) }, [rec.status])
-
-  const onSend = (text) => {
-    const reply = runCommand(text, rec)
-    const id = Math.random().toString(36).slice(2)
-    setTurns((t) => [...t, { id, q: text, a: '' }])
-    setStreaming(true)
-    cancel.current = streamText(
-      reply,
-      (p) => setTurns((t) => t.map((x) => (x.id === id ? { ...x, a: p } : x))),
-      (f) => { setTurns((t) => t.map((x) => (x.id === id ? { ...x, a: f } : x))); setStreaming(false) },
-    )
-  }
-
+// ---------------------------------------------------------------- attachments
+function AttachmentZone({ rec }) {
+  const [over, setOver] = useState(false)
+  const input = useRef(null)
+  const locked = ['generating', 'insights', 'saving', 'saved'].includes(rec.stage)
+  const full = rec.files.length >= MAX_FILES
   return (
-    <>
-      {turns.length > 0 && (
-        <div className="space-y-5">
-          {turns.map((t) => (
-            <div key={t.id} className="space-y-3 animate-fadeIn">
-              <div className="ml-auto w-fit max-w-[80%] rounded-3xl bg-gray-100 px-4 py-2 text-[15px] dark:bg-gray-850">{t.q}</div>
-              <div className="flex gap-3">
-                <span className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-accent-400 to-indigo-500 text-white"><Sparkles size={13} /></span>
-                <div className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{t.a}</ReactMarkdown></div>
-              </div>
-            </div>
-          ))}
-          <div ref={bottom} />
+    <div className={panel + ' p-4'}>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm font-medium">Context files <span className="font-normal text-gray-500">· grounding for key insights</span></p>
+        <span className="text-xs text-gray-500">{rec.files.length}/{MAX_FILES}</span>
+      </div>
+      {!locked && (
+        <div
+          onDragOver={(e) => { e.preventDefault(); setOver(true) }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => { e.preventDefault(); setOver(false); rec.addFiles([...e.dataTransfer.files]) }}
+          onClick={() => !full && input.current.click()}
+          className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-4 text-sm transition
+            ${over ? 'border-red-400 bg-red-500/5 text-gray-200' : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-800 dark:hover:border-gray-600'}
+            ${full ? 'pointer-events-none opacity-40' : ''}`}
+        >
+          <Paperclip size={16} /> Drop files or click to attach · PDF, DOCX, TXT, CSV, PNG, JPG (≤10 MB)
+          <input ref={input} type="file" multiple hidden accept={ACCEPT} onChange={(e) => { rec.addFiles([...e.target.files]); e.target.value = '' }} />
         </div>
       )}
-      <ChatDock>
-        <Composer
-          onSend={onSend} streaming={streaming} onStop={() => cancel.current?.()} autoFocus={false}
-          showRouting={false} allowExpertise={false}
-          placeholder='Ask about this meeting — e.g. "Summarise the meeting" or "Replace Kepel with Keppel"'
-        />
-      </ChatDock>
-    </>
+      {rec.files.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {rec.files.map((f) => (
+            <span key={f.id} className="flex items-center gap-1.5 rounded-lg bg-gray-100 py-1 pl-2 pr-1 text-xs dark:bg-gray-900 dark:ring-1 dark:ring-gray-800">
+              {/\.(png|jpe?g)$/i.test(f.name) ? <ImageIcon size={13} /> : <FileText size={13} />}
+              <span className="max-w-[200px] truncate">{f.name}</span>
+              <span className="text-gray-500">{kb(f.size)}</span>
+              {!locked && <button className="rounded p-0.5 hover:bg-white/10" onClick={() => rec.removeFile(f.id)} title="Remove"><X size={12} /></button>}
+            </span>
+          ))}
+        </div>
+      )}
+      {rec.fileErrors.length > 0 && <p className="mt-2 text-xs text-amber-400">{rec.fileErrors.join(' · ')}</p>}
+      <p className="mt-2 text-[11px] text-gray-500">Files are used only to generate insights. They are never uploaded to storage — only filenames are saved.</p>
+    </div>
   )
 }
 
-const ChatDock = ({ children }) => (
-  <div className="sticky bottom-0 -mx-4 bg-gradient-to-t from-white via-white to-transparent px-4 pb-3 pt-6 dark:from-gray-900 dark:via-gray-900">{children}</div>
-)
-
-function LockedComposer() {
+// ---------------------------------------------------------------- stepper
+const STEPS = ['Record', 'Review & amend', 'Key insights', 'Approve & save']
+const stepIndex = { idle: 0, recording: 0, review: 1, generating: 2, insights: 2, saving: 3, saved: 3 }
+function Stepper({ stage }) {
+  const cur = stepIndex[stage]
   return (
-    <ChatDock>
-      <div className="mx-auto flex w-full max-w-3xl items-center gap-3 rounded-3xl border border-dashed border-gray-300 px-5 py-4 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-850">
-        <Lock size={16} /> Chat unlocks when the recording ends — then ask me to summarise or edit the transcript.
-      </div>
-    </ChatDock>
+    <ol className="flex items-center justify-center gap-2 text-xs">
+      {STEPS.map((s, i) => (
+        <li key={s} className="flex items-center gap-2">
+          <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 ${i < cur || stage === 'saved' ? 'text-emerald-400' : i === cur ? 'bg-white/10 text-gray-100' : 'text-gray-500'}`}>
+            {i < cur || stage === 'saved' ? <CheckCircle2 size={13} /> : <span className="font-mono">{i + 1}</span>} {s}
+          </span>
+          {i < STEPS.length - 1 && <span className="h-px w-5 bg-gray-700" />}
+        </li>
+      ))}
+    </ol>
   )
 }
 
-// ---------------------------------------------------------------- save indicator
-function SaveBadge({ save }) {
-  const map = {
-    saving: [<Loader2 key="i" size={13} className="animate-spin" />, 'Saving…'],
-    saved: [<Cloud key="i" size={13} />, hasSupabase ? 'Saved to Supabase' : 'Saved locally'],
-    error: [<CloudOff key="i" size={13} className="text-red-400" />, 'Save failed'],
-  }
-  const v = map[save.state]
-  if (!v) return null
-  return <span className="mr-1 flex items-center gap-1.5 text-xs text-gray-500" title={save.error || ''}>{v[0]} {v[1]}</span>
+// ---------------------------------------------------------------- step 1: review & amend
+function ReviewStep({ rec }) {
+  const ta = useRef(null)
+  const [confirm, setConfirm] = useState(false)
+  const busy = rec.stage === 'generating'
+  useLayoutEffect(() => {
+    const el = ta.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.max(280, el.scrollHeight) + 'px'
+  }, [rec.transcript])
+  const words = rec.transcript.trim() ? rec.transcript.trim().split(/\s+/).length : 0
+  return (
+    <div className={`${panel} flex flex-col`}>
+      <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 dark:border-gray-800">
+        <p className="text-sm font-medium">Review &amp; Amend Transcript</p>
+        <span className="text-xs text-gray-500">{words} words · {fmt(rec.elapsed)}</span>
+      </div>
+      <div className="px-5 py-4">
+        <p className="mb-3 text-xs text-gray-500">Fix misheard words or add anything that was missed. This exact text is what gets analysed and saved as the raw transcript.</p>
+        <textarea
+          ref={ta}
+          value={rec.transcript}
+          disabled={busy}
+          onChange={(e) => rec.setTranscript(e.target.value)}
+          placeholder="Nothing was transcribed — type or paste the meeting notes here."
+          className="w-full resize-none rounded-xl bg-gray-50 p-4 text-[15px] leading-7 outline-none ring-1 ring-gray-200 focus:ring-gray-400 disabled:opacity-60 dark:bg-gray-900 dark:ring-gray-800 dark:focus:ring-gray-600"
+        />
+      </div>
+      <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-5 py-3 dark:border-gray-800">
+        {confirm ? (
+          <span className="flex items-center gap-2 text-sm">
+            Discard this session?
+            <button className="btn bg-red-600 text-white hover:bg-red-500" onClick={rec.discard}>Discard</button>
+            <button className="btn-ghost" onClick={() => setConfirm(false)}>Keep</button>
+          </span>
+        ) : (
+          <button className="btn-danger" disabled={busy} onClick={() => setConfirm(true)}><Trash2 size={15} /> Discard Session</button>
+        )}
+        <button className="btn bg-[#EF4444] px-4 py-2 text-white hover:bg-[#DC2626]" disabled={busy || !rec.transcript.trim()} onClick={rec.generate}>
+          {busy ? <><Loader2 size={15} className="animate-spin" /> Generating insights…</> : <><Sparkles size={15} /> Generate Key Insights</>}
+        </button>
+      </div>
+    </div>
+  )
 }
 
+// ---------------------------------------------------------------- step 2/3: read-only insights drawer
+function Card({ title, children }) {
+  return (
+    <section className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900">
+      <h3 className="label mb-2">{title}</h3>
+      {children}
+    </section>
+  )
+}
 
-// ---------------------------------------------------------------- recent meetings
+function InsightsDrawer({ rec }) {
+  const [showClean, setShowClean] = useState(false)
+  const open = ['insights', 'saving', 'saved'].includes(rec.stage) && rec.insights
+  if (!open) return null
+  const ins = rec.insights
+  const saving = rec.stage === 'saving'
+  const done = rec.stage === 'saved'
+  const asText = [
+    rec.title, '', 'SUMMARY', ins.summary, '', 'KEY TAKEAWAYS', ...ins.key_takeaways.map((t) => `- ${t}`), '',
+    'ACTION ITEMS', ...ins.action_items.map((a) => `- ${a.task} (${a.owner}, ${a.due_date})`),
+  ].join('\n')
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/50 backdrop-blur-sm animate-fadeIn">
+      <aside className="flex h-full w-full max-w-xl flex-col border-l border-gray-800 bg-white dark:bg-gray-850">
+        <header className="flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+          <div>
+            <p className="flex items-center gap-2 text-base font-semibold"><Sparkles size={16} className="text-red-400" /> Key Insights</p>
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500"><Lock size={11} /> Read-only · model-derived audit output · {rec.title}</p>
+          </div>
+          {!done && <button className="icon-btn" disabled={saving} onClick={rec.backToEdit} title="Back to edit (discards insights)"><X size={18} /></button>}
+        </header>
+
+        <div className="flex-1 select-text space-y-3 overflow-y-auto px-5 py-4" aria-readonly="true">
+          <Card title="Meeting summary">
+            <div className="space-y-2 text-sm leading-6 text-gray-700 dark:text-gray-200">
+              {ins.summary.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}
+            </div>
+          </Card>
+          <Card title="Key takeaways & decisions">
+            {ins.key_takeaways.length ? (
+              <ul className="list-disc space-y-1.5 pl-5 text-sm leading-6">{ins.key_takeaways.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            ) : <p className="text-sm text-gray-500">None identified.</p>}
+          </Card>
+          <Card title="Action items">
+            {ins.action_items.length ? (
+              <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-gray-100 text-xs text-gray-500 dark:bg-gray-850">
+                    <tr><th className="px-3 py-2 font-medium">Task</th><th className="px-3 py-2 font-medium">Owner</th><th className="px-3 py-2 font-medium">Due</th></tr>
+                  </thead>
+                  <tbody>
+                    {ins.action_items.map((a, i) => (
+                      <tr key={i} className="border-t border-gray-200 align-top dark:border-gray-800">
+                        <td className="px-3 py-2">{a.task}</td><td className="px-3 py-2 text-gray-500">{a.owner}</td><td className="whitespace-nowrap px-3 py-2 text-gray-500">{a.due_date}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : <p className="text-sm text-gray-500">No action items identified.</p>}
+          </Card>
+          <Card title="Cleaned transcript">
+            <button className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300" onClick={() => setShowClean(!showClean)}>
+              <ChevronDown size={13} className={showClean ? 'rotate-180' : ''} /> {showClean ? 'Hide' : 'Show'} cleaned transcript
+            </button>
+            {showClean && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600 dark:text-gray-300">{ins.cleaned_transcript}</p>}
+          </Card>
+          {(rec.files.length > 0 || rec.saved?.attached_files?.length > 0) && (
+            <p className="text-xs text-gray-500">Grounded on: {(rec.files.length ? rec.files.map((f) => f.name) : rec.saved.attached_files.map((f) => f.filename)).join(', ')}</p>
+          )}
+        </div>
+
+        <footer className="space-y-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+          {rec.error && <p className="flex items-center gap-1.5 text-sm text-red-400"><AlertTriangle size={14} /> {rec.error}</p>}
+          {done ? (
+            <div className="flex items-center justify-between">
+              <p className="flex items-center gap-2 text-sm text-emerald-400"><CheckCircle2 size={16} /> Approved &amp; saved to database</p>
+              <button className="btn-outline" onClick={rec.discard}>New meeting</button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex gap-1">
+                <button className="btn-ghost" disabled={saving} onClick={rec.backToEdit}><ArrowLeft size={15} /> Back to edit</button>
+                <button className="btn-ghost" onClick={() => navigator.clipboard.writeText(asText)}><Copy size={15} /> Copy</button>
+              </div>
+              <button className="btn bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-500" disabled={saving} onClick={rec.approve}>
+                {saving ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : <><ShieldCheck size={15} /> Approve &amp; Save to Database</>}
+              </button>
+            </div>
+          )}
+          {!done && <p className="text-[11px] text-gray-500">Going back to edit discards these insights so the saved record always matches its transcript.</p>}
+        </footer>
+      </aside>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- recent (approved) meetings
 function RecentMeetings({ rec }) {
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState(null)
-  const refresh = () => listMeetings(10).then(setRows).catch((e) => setErr(e.message))
-  // reload whenever a recording finishes or the user returns to idle
-  useEffect(() => { if (rec.status !== 'recording') refresh() }, [rec.status, rec.meeting?.id]) // eslint-disable-line
-  if (rec.status === 'recording') return null
-  const list = (rows || []).filter((r) => r.id !== rec.meeting?.id && (r.transcript_text || '').trim())
-  if (!list.length && !err) return null
+  useEffect(() => {
+    if (rec.stage !== 'idle' || !hasSupabase) return
+    listMeetings(10).then(setRows).catch((e) => setErr(e.message))
+  }, [rec.stage])
+  if (rec.stage !== 'idle' || (!rows?.length && !err)) return null
   return (
     <div className={`${panel} px-5 py-4`}>
       <p className="mb-2 flex items-center gap-2 text-sm font-medium"><History size={15} className="text-gray-500" /> Recent meetings</p>
       {err && <p className="text-sm text-red-400">Couldn't load meetings: {err}</p>}
       <div className="divide-y divide-gray-100 dark:divide-gray-800">
-        {list.map((m) => (
-          <div key={m.id} className="group flex items-center gap-3 py-2">
-            <button className="min-w-0 flex-1 text-left" onClick={() => rec.load(m)}>
-              <span className="block truncate text-sm font-medium group-hover:text-accent-500">{m.title}</span>
-              <span className="block truncate text-xs text-gray-500">
-                {new Date(m.created_at).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {fmt(m.duration || 0)} · {m.transcript_text.slice(0, 80)}
-              </span>
-            </button>
-            <button
-              className="icon-btn opacity-0 group-hover:opacity-100"
-              title="Delete meeting"
-              onClick={async () => { await deleteMeeting(m.id); refresh() }}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
+        {(rows || []).map((m) => (
+          <button key={m.id} className="group block w-full py-2 text-left" onClick={() => rec.load(m)}>
+            <span className="block truncate text-sm font-medium group-hover:text-accent-500">{m.title}</span>
+            <span className="block truncate text-xs text-gray-500">
+              {new Date(m.created_at).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {fmt(m.duration || 0)} · {m.summary.slice(0, 90)}
+            </span>
+          </button>
         ))}
       </div>
     </div>
@@ -332,56 +415,74 @@ function RecentMeetings({ rec }) {
 export default function MeetingRecorder() {
   const user = useStore((s) => s.user)
   const rec = useMeetingRecorder()
-  const recording = rec.status === 'recording'
+  const live = rec.stage === 'idle' || rec.stage === 'recording'
 
-  // warn before closing the tab mid-recording
   useEffect(() => {
-    if (!recording) return
+    if (rec.stage === 'idle' || rec.stage === 'saved') return
     const h = (e) => { e.preventDefault(); e.returnValue = '' }
     window.addEventListener('beforeunload', h)
     return () => window.removeEventListener('beforeunload', h)
-  }, [recording])
+  }, [rec.stage])
 
   return (
-    <div className="flex h-full flex-col">
-      <TopBar
-        right={
-          <>
-            <SaveBadge save={rec.save} />
-            {rec.status === 'done' && (
-              <button className="btn-ghost mr-1" onClick={rec.reset}><RotateCcw size={14} /> New meeting</button>
-            )}
-          </>
-        }
-      >
-        {rec.status !== 'idle' ? (
+    <div className="flex h-full flex-col dark:bg-gray-900">
+      <TopBar>
+        {rec.stage !== 'idle' ? (
           <input
             value={rec.title}
             onChange={(e) => rec.setTitle(e.target.value)}
+            disabled={rec.stage === 'saved'}
             className="w-full max-w-sm rounded-lg bg-transparent px-2 py-1 text-sm font-medium outline-none hover:bg-gray-100 focus:bg-gray-100 dark:hover:bg-gray-850 dark:focus:bg-gray-850"
             aria-label="Meeting title"
           />
-        ) : (
-          <span className="px-2 text-sm font-medium">Meeting Recorder</span>
-        )}
+        ) : <span className="px-2 text-sm font-medium">Meeting Recorder</span>}
       </TopBar>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-5 px-4 pt-6">
+        <div className="mx-auto flex max-w-3xl flex-col gap-5 px-4 pb-10 pt-6">
           <div className="flex items-center justify-center gap-3 animate-fadeIn">
             <Logo size={34} />
             <h1 className="text-2xl font-medium tracking-tight sm:text-3xl">Ready to record your meeting, {user.name.split(' ')[0]}?</h1>
           </div>
+          <Stepper stage={rec.stage} />
 
-          <RecordControl rec={rec} />
-          <Transcript rec={rec} />
+          {!hasSupabase && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.local and restart the dev server — insights and saving need it.
+            </div>
+          )}
+
+          {rec.restored && rec.stage === 'idle' && (
+            <div className={`${panel} flex items-center justify-between gap-3 px-4 py-3 text-sm`}>
+              <span className="flex items-center gap-2"><History size={15} className="text-gray-400" /> Unsaved draft found: <b className="font-medium">{rec.restored.title}</b></span>
+              <span className="flex gap-1">
+                <button className="btn-ghost" onClick={rec.dismissDraft}>Dismiss</button>
+                <button className="btn-outline" onClick={rec.resumeDraft}>Resume review</button>
+              </span>
+            </div>
+          )}
+
           <RecentMeetings rec={rec} />
 
-          <div className="mt-auto">
-            {rec.status === 'done' ? <MeetingChat rec={rec} /> : <LockedComposer />}
-          </div>
+          {live ? (
+            <>
+              <RecordControl rec={rec} />
+              <AttachmentZone rec={rec} />
+              <Transcript rec={rec} />
+            </>
+          ) : (
+            <>
+              <AttachmentZone rec={rec} />
+              <ReviewStep rec={rec} />
+              {rec.error && rec.stage === 'review' && (
+                <p className="flex items-center gap-1.5 text-sm text-red-400"><AlertTriangle size={14} /> {rec.error}</p>
+              )}
+            </>
+          )}
         </div>
       </div>
+      <InsightsDrawer rec={rec} />
     </div>
   )
 }
