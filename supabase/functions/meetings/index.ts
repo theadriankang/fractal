@@ -74,7 +74,7 @@ async function insights(body: any) {
       content.push({ type: "text", text: `<context_file name="${name}">\n${String(f.data).slice(0, 100_000)}\n</context_file>` });
     }
   }
-  content.push({ type: "text", text: `<transcript>\n${transcript}\n</transcript>\n\nDerive the meeting insights.` });
+  content.push({ type: "text", text: `<transcript>\n${transcript}\n</transcript>\n\nDerive the meeting insights by calling the record_meeting_insights tool.` });
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -84,7 +84,8 @@ async function insights(body: any) {
       max_tokens: 8000,
       system: SYSTEM,
       tools: [INSIGHTS_TOOL],
-      tool_choice: { type: "tool", name: INSIGHTS_TOOL.name },
+      // Newer Claude models reject forced tool_choice ("tool"/"any"); "auto" + the system rule still yields a tool call.
+      tool_choice: { type: "auto" },
       messages: [{ role: "user", content }],
     }),
   });
@@ -94,7 +95,7 @@ async function insights(body: any) {
   const out = call?.input;
   const ok = out && typeof out.cleaned_transcript === "string" && typeof out.summary === "string" &&
     Array.isArray(out.key_takeaways) && Array.isArray(out.action_items);
-  if (!ok) return json({ error: "Claude returned an unexpected format. Please try again." }, 502);
+  if (!ok) return json({ error: call ? "Claude returned an unexpected format. Please try again." : "Claude answered without using the insights tool. Please try again." }, 502);
   return json({ insights: out });
 }
 
