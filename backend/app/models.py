@@ -6,7 +6,7 @@ from sqlalchemy import (
     String, Text, Boolean, Integer, BigInteger, Float, DateTime,
     ForeignKey, JSON,
 )
-from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -24,7 +24,10 @@ class Profile(Base):
     __tablename__ = "profiles"
     id: Mapped[str] = mapped_column(PgUUID(as_uuid=False), primary_key=True)
     name: Mapped[str] = mapped_column(Text, default="")
+    email: Mapped[str | None] = mapped_column(Text, nullable=True)
     role: Mapped[str] = mapped_column(String, default="contributor")
+    # text[] in Postgres; JSON elsewhere so the API tests can run on SQLite.
+    domains: Mapped[list] = mapped_column(ARRAY(Text).with_variant(JSON, "sqlite"), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -57,6 +60,8 @@ class Message(Base):
     web_search: Mapped[bool] = mapped_column(Boolean, default=False)
     detection: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     detection_state: Mapped[str | None] = mapped_column(String, nullable=True)
+    detection_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detection_missing: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     chat: Mapped["Chat"] = relationship("Chat", back_populates="messages")
@@ -105,6 +110,8 @@ class Expertise(Base):
     sources: Mapped[list] = mapped_column(JSON, default=list)
     feedback: Mapped[list] = mapped_column(JSON, default=list)
     origin: Mapped[str | None] = mapped_column(Text, nullable=True)
+    capture: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    author_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -132,6 +139,11 @@ class Proposal(Base):
     changes: Mapped[dict] = mapped_column(JSON, default=dict)
     chat_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, default="open")
+    author_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    capture: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    meeting_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meeting_title: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Feedback(Base):
@@ -142,12 +154,13 @@ class Feedback(Base):
     user_name: Mapped[str] = mapped_column(Text, default="")
     rating: Mapped[str] = mapped_column(String, nullable=False)
     comment: Mapped[str] = mapped_column(Text, default="")
+    chat_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     actor: Mapped[str | None] = mapped_column(String, nullable=True)
     actor_role: Mapped[str | None] = mapped_column(String, nullable=True)

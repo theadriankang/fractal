@@ -2,8 +2,9 @@
 """
 Seed the Supabase database from backend/seed_data.json.
 
-Idempotent: upserts by id. Also creates two demo users via the Supabase
-Admin API (service role key) and matching profiles rows.
+Idempotent: upserts by id. Also creates the demo accounts from src/data/users.js
+via the Supabase Admin API (service role key) and matching profiles rows
+(name, email, role, domains) so the front end's demo sign-in maps onto them.
 
 Run from the backend/ directory:
     python seed.py
@@ -95,7 +96,7 @@ def _find_user_by_email(sb, email: str):
     return None
 
 
-def upsert_user(sb, email: str, password: str, name: str, role: str) -> str | None:
+def upsert_user(sb, email: str, password: str, name: str, role: str, domains: list[str]) -> str | None:
     """Create or update a demo user via Supabase Admin API. Returns user id."""
     if not sb:
         print(f"  [skip] No Supabase client — cannot create {email}")
@@ -132,12 +133,10 @@ def upsert_user(sb, email: str, password: str, name: str, role: str) -> str | No
     db = SessionLocal()
     try:
         p = db.get(Profile, uid)
-        if p:
-            p.name = name
-            p.role = role
-        else:
-            p = Profile(id=uid, name=name, role=role)
+        if not p:
+            p = Profile(id=uid)
             db.add(p)
+        p.name, p.email, p.role, p.domains = name, email, role, domains
         db.commit()
     finally:
         db.close()
@@ -273,10 +272,13 @@ def main():
     # Create demo users
     print("\n[1/3] Creating demo users...")
     sb = get_supabase_client()
-    adrian_id = upsert_user(sb, "adrian@fractal.demo", "demo1234", "Adrian Kang", "reviewer")
-    priya_id = upsert_user(sb, "priya@fractal.demo", "demo1234", "Priya S.", "contributor")
+    ids = {
+        u["email"]: upsert_user(sb, u["email"], u["password"], u["name"], u["role"], u.get("domains", []))
+        for u in data.get("users", [])
+    }
 
-    default_user = adrian_id or "00000000-0000-0000-0000-000000000000"
+    # Seed chats belong to the Reviewer account (chatOwner in src/store.js).
+    default_user = ids.get("adrian@fractal.demo") or "00000000-0000-0000-0000-000000000000"
 
     db = SessionLocal()
     try:
@@ -293,7 +295,7 @@ def main():
         db.close()
 
     print("\n=== Seed complete ===")
-    print(f"  Demo users: adrian@fractal.demo (reviewer), priya@fractal.demo (contributor)")
+    print(f"  Demo users: {', '.join(e for e, uid in ids.items() if uid)}")
     print(f"  Password: demo1234")
 
 
