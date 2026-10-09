@@ -6,7 +6,7 @@ import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfo
 import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
-import { isLive, streamChat, extractKnowhow } from './lib/api'
+import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat } from './lib/api'
 import { DEMO_USERS, authenticate, userById } from './data/users'
 import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit, deleteBlock } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
@@ -44,6 +44,45 @@ function withSnapshots(list) {
 }
 
 const streams = new Map() // msgId -> [cancelFns]
+
+// ---------------- Supabase sync ----------------
+// Once the signed-in account's data has loaded from the backend (dataSource 'supabase'), each
+// change is applied to the store at once and then written through the API — one write at a time,
+// in order — and the server's copy replaces the optimistic one. If a write fails, the store reloads
+// from Supabase so the UI never shows what wasn't saved. With VITE_USE_MOCK=true or the backend
+// offline, data stays in this browser as before.
+let writes = Promise.resolve()
+
+function sync(get, what, write, onSaved) {
+  if (get().dataSource !== 'supabase') return
+  const api = apiFor(get().user)
+  writes = writes
+    .then(() => write(api))
+    .then((res) => onSaved?.(res))
+    .catch((err) => {
+      get().showToast(`Couldn't save ${what} — ${err.message}`)
+      get().loadFromBackend({ quiet: true })
+    })
+}
+
+// Chats and messages are read from the store when the write runs, so they save their latest state.
+const saveChat = (get, chatId) =>
+  sync(get, 'the chat', (api) => {
+    const c = get().chats.find((x) => x.id === chatId)
+    return c && api.saveChat(c)
+  })
+
+const saveMessage = (get, chatId, msgId) =>
+  sync(get, 'the message', (api) => {
+    const m = get().chats.find((c) => c.id === chatId)?.messages.find((x) => x.id === msgId)
+    return m && api.saveMessage(chatId, m)
+  })
+
+const replaceById = (list, item) => list.map((x) => (x.id === item.id ? item : x))
+const putExpertise = (set) => (e) => set((s) => ({ expertise: replaceById(s.expertise, e) }))
+const putProposal = (set) => (p) => set((s) => ({ proposals: replaceById(s.proposals, p) }))
+const localUpdate = (set, id, patch) =>
+  set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? { ...e, ...patch, updatedAt: now() } : e)) }))
 
 const HISTORY_TURNS = 20
 
@@ -151,6 +190,8 @@ export const useStore = create(
       selectedModels: ['auto'],
 
       // ---------------- ui (not persisted) ----------------
+      // 'supabase' once chats/expertise/proposals have loaded from the backend; 'local' = this browser only.
+      dataSource: 'local',
       sidebarOpen: true,
       settingsOpen: false,
       settingsTab: 'general',
@@ -198,15 +239,58 @@ export const useStore = create(
 
       setSelectedModels: (ids) => set({ selectedModels: ids.length ? ids : ['auto'] }),
 
+      // Loads the signed-in account's chats, the Library and the open Review Queue from Supabase.
+      loadFromBackend: async ({ quiet = false } = {}) => {
+        const user = get().user
+        if (USE_MOCK || !user) return
+        try {
+          const api = apiFor(user)
+          const [chats, expertise, proposals] = await Promise.all([api.listChats(), api.listExpertise(), api.listProposals()])
+          if (get().user?.id !== user.id) return // switched account while loading
+          const local = get().chats
+          const saved = new Set(chats.map((c) => c.id))
+          // Keep answers still streaming (saved when they finish) and empty drafts not yet saved.
+          const merge = (c) => {
+            const streaming = (local.find((x) => x.id === c.id)?.messages || []).filter((m) => m.responses?.some((r) => r.streaming))
+            const ids = new Set(streaming.map((m) => m.id))
+            return streaming.length ? { ...c, messages: [...c.messages.filter((m) => !ids.has(m.id)), ...streaming] } : c
+          }
+          const drafts = local.filter((c) => !saved.has(c.id) && chatOwner(c) === user.id && !c.messages.length)
+          set({
+            dataSource: 'supabase',
+            chats: [...drafts, ...chats.map((c) => merge(fromApiChat(c, user.id)))],
+            expertise,
+            proposals,
+          })
+          return true
+        } catch (err) {
+          set({ dataSource: 'local' })
+          if (!quiet)
+            get().showToast(err.status === 0
+              ? 'Backend offline — using local demo data. Start it (see backend/README.md) or set VITE_USE_MOCK=true.'
+              : `Couldn't load from Supabase (${err.message}) — using local demo data.`)
+          return false
+        }
+      },
+
       // ---------------- chats ----------------
       newChat: () => {
         const id = uid('chat')
         set((s) => ({ chats: [{ id, ownerId: get().user?.id, title: 'New Chat', folder: null, updatedAt: now(), messages: [] }, ...s.chats] }))
         return id
       },
-      renameChat: (id, title) => set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, title } : c)) })),
-      togglePin: (id) => set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, pinned: !c.pinned } : c)) })),
-      deleteChat: (id) => set((s) => ({ chats: s.chats.filter((c) => c.id !== id) })),
+      renameChat: (id, title) => {
+        set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, title } : c)) }))
+        saveChat(get, id)
+      },
+      togglePin: (id) => {
+        set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, pinned: !c.pinned } : c)) }))
+        saveChat(get, id)
+      },
+      deleteChat: (id) => {
+        set((s) => ({ chats: s.chats.filter((c) => c.id !== id) }))
+        sync(get, 'the deletion', (api) => api.deleteChat(id))
+      },
 
       patchChat: (chatId, fn) =>
         set((s) => ({ chats: s.chats.map((c) => (c.id === chatId ? fn(c) : c)) })),
@@ -216,12 +300,15 @@ export const useStore = create(
       sendMessage: (chatId, text, { attachedExpertise = [], files = [], webSearch = false } = {}) => {
         const { settings, expertise, selectedModels } = get()
         const enabledModels = selectedModels
-        const userMsg = { id: uid('m'), role: 'user', content: text, files, attachedExpertise, webSearch, createdAt: now() }
+        // The answer is stamped 1 ms after the question so the saved order is stable.
+        const sentAt = Date.now()
+        const userMsg = { id: uid('m'), role: 'user', content: text, files, attachedExpertise, webSearch, createdAt: new Date(sentAt).toISOString() }
         const matched = matchExpertise(text, expertise, attachedExpertise, settings.autoApply)
 
         const responses = enabledModels.map((mid) => {
           const auto = mid === 'auto' ? routeAuto(text) : null
           return {
+            id: uid('r'),
             modelId: auto ? auto.modelId : mid,
             auto: auto ? { category: auto.category, reason: auto.reason } : null,
             expertise: matched.map((e) => ({ id: e.id, version: e.version })),
@@ -230,7 +317,7 @@ export const useStore = create(
             rating: null,
           }
         })
-        const asstMsg = { id: uid('m'), role: 'assistant', createdAt: now(), responses }
+        const asstMsg = { id: uid('m'), role: 'assistant', createdAt: new Date(sentAt + 1).toISOString(), responses }
 
         get().patchChat(chatId, (c) => ({
           ...c,
@@ -239,17 +326,23 @@ export const useStore = create(
           messages: [...c.messages, userMsg, asstMsg],
         }))
 
+        saveChat(get, chatId)
+        saveMessage(get, chatId, userMsg.id)
+
         // bump usage counts
-        if (matched.length)
+        if (matched.length) {
           set((s) => ({
             expertise: s.expertise.map((e) => (matched.some((m) => m.id === e.id) ? { ...e, usageCount: e.usageCount + 1 } : e)),
           }))
+          sync(get, 'usage counts', (api) => api.recordUsage(matched.map((e) => e.id)))
+        }
 
         let remaining = responses.length
         const onFinish = () => {
           remaining -= 1
           if (remaining > 0) return
           streams.delete(asstMsg.id)
+          saveMessage(get, chatId, asstMsg.id)
           if (get().settings.autoDetect) get().runCapture(chatId, asstMsg.id, text, matched)
         }
         const cancels = responses.map((_, idx) => streamResponse(get, chatId, asstMsg.id, idx, { prompt: text, matched, onFinish }))
@@ -269,9 +362,9 @@ export const useStore = create(
         const matched = get().expertise.filter((e) => r.expertise.some((x) => x.id === e.id))
         get().patchMessage(chatId, msgId, (m) => ({
           ...m,
-          responses: m.responses.map((x, k) => (k === idx ? { ...x, rid: uid('r'), content: '', streaming: true, rating: null, error: undefined } : x)),
+          responses: m.responses.map((x, k) => (k === idx ? { ...x, id: uid('r'), rid: undefined, content: '', streaming: true, rating: null, error: undefined } : x)),
         }))
-        const cancel = streamResponse(get, chatId, msgId, idx, { prompt, matched })
+        const cancel = streamResponse(get, chatId, msgId, idx, { prompt, matched, onFinish: () => saveMessage(get, chatId, msgId) })
         streams.set(msgId, [...(streams.get(msgId) || []), cancel])
       },
 
@@ -286,9 +379,16 @@ export const useStore = create(
           ...m,
           responses: m.responses.map((x, k) => (k === idx ? { ...x, rating: next } : x)),
         }))
-        if (!r.expertise.length) return
         const { id: userId, name: user } = get().user
         const key = responseKey(msgId, idx, r)
+        // The server repeats the feedback + correction below; its copies replace these.
+        const proposalId = uid('prop')
+        if (r.id)
+          sync(get, 'your rating', (api) => api.rateResponse(r.id, { rating: next, comment, chatId, proposalId, authorId: userId, responseKey: key }), (res) => {
+            res.expertise.forEach(putExpertise(set))
+            if (res.proposal) putProposal(set)(res.proposal)
+          })
+        if (!r.expertise.length) return
         set((s) => ({
           expertise: s.expertise.map((e) => {
             const ref = r.expertise.find((x) => x.id === e.id)
@@ -309,7 +409,7 @@ export const useStore = create(
           set((s) => ({
             proposals: [
               {
-                id: uid('prop'),
+                id: proposalId,
                 expertiseId: target,
                 type: 'revision',
                 createdAt: now(),
@@ -327,7 +427,10 @@ export const useStore = create(
       },
 
       // ---------------- detection → expertise ----------------
-      dismissDetection: (chatId, msgId) => get().patchMessage(chatId, msgId, (m) => ({ ...m, detectionState: 'dismissed' })),
+      dismissDetection: (chatId, msgId) => {
+        get().patchMessage(chatId, msgId, (m) => ({ ...m, detectionState: 'dismissed' }))
+        saveMessage(get, chatId, msgId)
+      },
 
       // After an answer finishes: ask the extractor whether the user shared reusable know-how.
       // Contributors only (reviewers approve, they don't author). Live (backend) answers use the
@@ -341,6 +444,7 @@ export const useStore = create(
         // No capture after a failed answer: the backend is likely down and a keyword guess would be noise.
         if (!msg.responses.some((r) => r.content && !r.error)) {
           get().patchMessage(chatId, msgId, (m) => ({ ...m, detection: null, detectionState: null }))
+          saveMessage(get, chatId, msgId)
           return
         }
         const keyword = () => fromKeywordDetector(detectExpertise(text, chat, matched), user, get().expertise)
@@ -359,6 +463,7 @@ export const useStore = create(
         }
         get().patchMessage(chatId, msgId, (m) =>
           det ? { ...m, detection: { ...det, capturedBy: user.id }, detectionState: 'pending' } : { ...m, detection: null, detectionState: null })
+        saveMessage(get, chatId, msgId)
       },
 
       // Saves a detection the user confirmed (optionally edited in the card):
@@ -406,17 +511,13 @@ export const useStore = create(
             changes[x.field].add.push(x.text.trim())
           }
           if (!Object.keys(changes).length) { get().showToast(`${target.name} already contains these lines`); return null }
-          const id = uid('prop')
-          set((s) => ({
-            proposals: [
-              { id, expertiseId: target.id, type: 'revision', createdAt: now(), author: `${user.name} (captured from chat)`, authorId: user.id,
-                reason: det.reason || 'New know-how shared during a conversation.', changes, chatId, capture, sources: [source] },
-              ...s.proposals,
-            ],
-          }))
-          result = { kind: 'revision', id, missing: [] }
+          const p = { id: uid('prop'), expertiseId: target.id, type: 'revision', createdAt: now(), author: `${user.name} (captured from chat)`, authorId: user.id,
+            reason: det.reason || 'New know-how shared during a conversation.', changes, chatId, capture, sources: [source] }
+          get().addProposals([p])
+          result = { kind: 'revision', id: p.id, missing: [] }
         }
         get().patchMessage(chatId, msgId, (m) => ({ ...m, detectionState: 'saved', detectionResult: result.id, detectionMissing: result.missing }))
+        saveMessage(get, chatId, msgId)
         return result
       },
 
@@ -454,11 +555,21 @@ export const useStore = create(
         }
         if (!e.keywords.length) e.keywords = e.name.toLowerCase().split(/\W+/).filter((w) => w.length > 3)
         set((s) => ({ expertise: [e, ...s.expertise] }))
+        sync(get, 'the new Expertise', (api) => api.createExpertise(e), putExpertise(set))
         return id
       },
 
-      updateExpertise: (id, patch) =>
-        set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? { ...e, ...patch, updatedAt: now() } : e)) })),
+      // Content and metadata edits. Status and version only change through the governance actions below.
+      updateExpertise: (id, patch) => {
+        localUpdate(set, id, patch)
+        sync(get, 'your edits', (api) => api.updateExpertise(id, patch), putExpertise(set))
+      },
+
+      // Saves proposals to the Review Queue (local first, then Supabase).
+      addProposals: (list) => {
+        set((s) => ({ proposals: [...list, ...s.proposals] }))
+        for (const p of list) sync(get, 'the proposal', (api) => api.createProposal(p), putProposal(set))
+      },
 
       // Live Expertise is never deleted outright: it is deprecated first (reversible), and only then
       // can the Reviewer delete it. Drafts can be deleted by the Reviewer or an expert in the domain.
@@ -470,6 +581,8 @@ export const useStore = create(
           expertise: s.expertise.filter((x) => x.id !== id),
           proposals: s.proposals.filter((p) => p.expertiseId !== id),
         }))
+        // Its proposals go with it in the database too (ON DELETE CASCADE).
+        sync(get, 'the deletion', (api) => api.deleteExpertise(id))
         get().showToast(`Deleted “${e.name}”`)
         return true
       },
@@ -480,7 +593,8 @@ export const useStore = create(
         if (block) { get().showToast(block); return }
         const r = readiness(e)
         if (!r.ready) { get().showToast(`Not ready for review — still needs: ${r.missing.map((m) => m.label.toLowerCase()).join('; ')}`); return }
-        get().updateExpertise(id, { status: 'in_review' })
+        localUpdate(set, id, { status: 'in_review' })
+        sync(get, 'the submission', (api) => api.expertiseAction(id, 'submit'), putExpertise(set))
         get().showToast('Submitted for review')
       },
 
@@ -489,12 +603,13 @@ export const useStore = create(
         const block = reviewBlock(get().user, e?.domain, e)
         if (block) { get().showToast(block); return }
         const version = bumpVersion(e.version)
-        get().updateExpertise(id, {
+        localUpdate(set, id, {
           status: 'approved',
           version,
           reviewer: get().user.name,
           versions: [...e.versions, { version, date: now(), author: e.owner, approvedBy: get().user.name, note, snapshot: snapshot(e) }],
         })
+        sync(get, 'the approval', (api) => api.expertiseAction(id, 'approve', { note }), putExpertise(set))
         get().showToast(`Approved — v${version} is live`)
       },
 
@@ -502,19 +617,22 @@ export const useStore = create(
         const e = get().expertise.find((x) => x.id === id)
         const block = reviewBlock(get().user, e?.domain, e)
         if (block) { get().showToast(block); return }
-        get().updateExpertise(id, { status: 'draft' })
+        localUpdate(set, id, { status: 'draft' })
+        sync(get, 'the decision', (api) => api.expertiseAction(id, 'reject'), putExpertise(set))
         get().showToast('Sent back to draft')
       },
 
       deprecateExpertise: (id) => {
         if (!canGovern(get().user)) { get().showToast('Only the Reviewer can deprecate Expertise.'); return }
-        get().updateExpertise(id, { status: 'deprecated' })
+        localUpdate(set, id, { status: 'deprecated' })
+        sync(get, 'the deprecation', (api) => api.expertiseAction(id, 'deprecate'), putExpertise(set))
         get().showToast('Expertise deprecated')
       },
 
       restoreExpertise: (id) => {
         if (!canGovern(get().user)) { get().showToast('Only the Reviewer can restore Expertise.'); return }
-        get().updateExpertise(id, { status: 'approved' })
+        localUpdate(set, id, { status: 'approved' })
+        sync(get, 'the restore', (api) => api.expertiseAction(id, 'restore'), putExpertise(set))
         get().showToast('Expertise restored')
       },
 
@@ -524,7 +642,7 @@ export const useStore = create(
         const target = e.versions.find((v) => v.version === toVersion)
         if (!target?.snapshot) return
         const version = bumpVersion(e.version)
-        get().updateExpertise(id, {
+        localUpdate(set, id, {
           ...structuredClone(target.snapshot),
           version,
           versions: [
@@ -532,6 +650,7 @@ export const useStore = create(
             { version, date: now(), author: get().user.name, approvedBy: get().user.name, note: `Rolled back to v${toVersion}`, snapshot: structuredClone(target.snapshot) },
           ],
         })
+        sync(get, 'the rollback', (api) => api.expertiseAction(id, 'rollback', { version: toVersion }), putExpertise(set))
         get().showToast(`Rolled back — now v${version}`)
       },
 
@@ -546,7 +665,7 @@ export const useStore = create(
         }
         const merged = { ...e, ...patch }
         const version = bumpVersion(e.version)
-        get().updateExpertise(e.id, {
+        localUpdate(set, e.id, {
           ...patch,
           version,
           // provenance (e.g. the meeting a revision came from) follows the change into the Expertise
@@ -554,6 +673,7 @@ export const useStore = create(
           versions: [...e.versions, { version, date: now(), author: p.author, approvedBy: get().user.name, note: p.reason, snapshot: snapshot(merged) }],
         })
         set((s) => ({ proposals: s.proposals.filter((x) => x.id !== pid) }))
+        sync(get, 'the approval', (api) => api.proposalAction(pid, 'approve'), putExpertise(set))
         get().showToast(`Revision merged — ${e.name} v${version}`)
       },
 
@@ -561,12 +681,7 @@ export const useStore = create(
         const e = get().expertise.find((x) => x.id === expertiseId)
         const block = contributeBlock(get().user, e?.domain)
         if (block) { get().showToast(block); return }
-        set((s) => ({
-          proposals: [
-            { id: uid('prop'), expertiseId, type: 'revision', createdAt: now(), author: get().user.name, authorId: get().user.id, reason, changes },
-            ...s.proposals,
-          ],
-        }))
+        get().addProposals([{ id: uid('prop'), expertiseId, type: 'revision', createdAt: now(), author: get().user.name, authorId: get().user.id, reason, changes }])
         get().showToast('Changes sent to the Review Queue')
       },
 
@@ -631,7 +746,7 @@ export const useStore = create(
             sources: ls.map((l) => source(l.takeaway || l.entry)),
           }))
         }
-        if (proposals.length) set((s) => ({ proposals: [...proposals, ...s.proposals] }))
+        if (proposals.length) get().addProposals(proposals)
         return { proposals: proposals.length, drafts: drafts.length, skipped }
       },
 
@@ -641,10 +756,16 @@ export const useStore = create(
         const block = reviewBlock(get().user, e?.domain, p)
         if (block) { get().showToast(block); return }
         set((s) => ({ proposals: s.proposals.filter((x) => x.id !== pid) }))
+        sync(get, 'the decision', (api) => api.proposalAction(pid, 'reject'))
         get().showToast('Proposal rejected')
       },
 
       resetDemo: () => {
+        // Connected to Supabase: never wipe shared data from the browser; just reload it.
+        if (get().dataSource === 'supabase') {
+          get().loadFromBackend().then((ok) => ok && get().showToast('Reloaded from Supabase'))
+          return
+        }
         set({ chats: SEED_CHATS, expertise: withSnapshots(SEED_EXPERTISE), proposals: SEED_PROPOSALS, selectedModels: ['auto'] })
         get().showToast('Demo data reset')
       },

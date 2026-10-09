@@ -30,6 +30,7 @@ def _to_camel(snake: str) -> str:
 
 # --- Response nested in a message ------------------------------------------
 class ResponseCreate(CamelModel):
+    id: Optional[str] = None
     model_id: str = ""
     auto: Optional[dict] = None
     expertise_used: list[dict] = Field(default_factory=list)
@@ -51,7 +52,10 @@ class MessageCreate(CamelModel):
     web_search: bool = False
     detection: Optional[dict] = None
     detection_state: Optional[str] = None
+    detection_result: Optional[str] = None
+    detection_missing: list[str] = Field(default_factory=list)
     responses: list[ResponseCreate] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
 
 
 class MessageOut(MessageCreate):
@@ -109,6 +113,8 @@ class ExpertiseCreate(CamelModel):
     sources: list[dict] = Field(default_factory=list)
     feedback: list[dict] = Field(default_factory=list)
     origin: Optional[str] = None
+    capture: Optional[dict] = None
+    author_id: Optional[str] = None
     versions: list[dict] = Field(default_factory=list)
 
 
@@ -181,23 +187,65 @@ class ExpertiseOut(CamelModel):
     sources: list[dict] = Field(default_factory=list)
     feedback: list[dict] = Field(default_factory=list)
     origin: Optional[str] = None
+    capture: Optional[dict] = None
+    author_id: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     versions: list[ExpertiseVersionOut] = Field(default_factory=list)
-    feedback_rows: list[FeedbackOut] = Field(default_factory=list)
 
 
 # --- Proposals --------------------------------------------------------------
-class ProposalOut(CamelModel):
-    id: str
+class ProposalCreate(CamelModel):
+    id: Optional[str] = None
     expertise_id: str
-    type: str
-    created_at: Optional[datetime] = None
-    author: str
-    reason: str
-    changes: dict = Field(default_factory=dict)
+    type: str = "revision"
+    author: str = ""
+    author_id: Optional[str] = None
+    reason: str = ""
+    changes: dict = Field(default_factory=dict)  # {field: {add: [...], remove: [...]}}
     chat_id: Optional[str] = None
+    capture: Optional[dict] = None
+    sources: list[dict] = Field(default_factory=list)
+    meeting_id: Optional[str] = None
+    meeting_title: Optional[str] = None
+
+
+class ProposalOut(ProposalCreate):
+    id: str
+    created_at: Optional[datetime] = None
     status: str = "open"
+
+
+# --- Governance + feedback requests ------------------------------------------
+class ApproveIn(CamelModel):
+    note: str = "Approved"
+
+
+class RollbackIn(CamelModel):
+    version: str
+
+
+class UsageIn(CamelModel):
+    ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class RatingIn(CamelModel):
+    rating: Optional[Literal["up", "down"]] = None
+    comment: str = ""
+    chat_id: Optional[str] = None
+    # Client-generated id for the 👎 correction proposal, so the optimistic copy and the saved row match.
+    proposal_id: Optional[str] = None
+    # The rater's account id and the answer's key (src/lib/ratings.js responseKey): one rating per
+    # person per answer, so a new rating replaces theirs and `rating: null` takes it back.
+    author_id: Optional[str] = None
+    response_key: Optional[str] = None
+
+
+class RatingOut(CamelModel):
+    expertise: list[ExpertiseOut] = Field(default_factory=list)
+    proposal: Optional[ProposalOut] = None
+    # Why a 👎 correction was not sent for review (e.g. the rater isn't an expert in that domain).
+    blocked: Optional[str] = None
 
 
 # --- Health ------------------------------------------------------------------

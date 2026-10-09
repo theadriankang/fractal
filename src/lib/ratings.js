@@ -4,8 +4,8 @@
 // and clicking the same thumb again takes the rating back. "Helpful %" is computed from the
 // feedback that is actually stored, so it moves as people rate answers.
 
-/** Stable key for one generated answer (a regenerated answer gets a new key). */
-export const responseKey = (msgId, idx, response) => response?.rid || `${msgId}:${idx}`
+/** Stable key for one generated answer (a regenerated answer gets a new id, so a new key). */
+export const responseKey = (msgId, idx, response) => response?.rid || response?.id || `${msgId}:${idx}`
 
 /**
  * New feedback list for one Expertise after `userId` rates the answer `key`.

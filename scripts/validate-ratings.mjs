@@ -31,5 +31,6 @@ assert.equal(averageHelpful([{ feedback: fb }, { feedback: [] }, { feedback: [up
 assert.equal(averageHelpful([{ feedback: [] }]), null)
 assert.equal(responseKey('m1', 0, {}), 'm1:0')
 assert.equal(responseKey('m1', 0, { rid: 'r-x' }), 'r-x', 'a regenerated answer has its own key')
+assert.equal(responseKey('m1', 0, { id: 'r-saved' }), 'r-saved', 'a saved answer is keyed by its id, so the key survives a reload')
 
 console.log('ratings checks passed')

@@ -1,4 +1,6 @@
-"""Expertise router — CRUD for expertise + taxonomy mirror."""
+"""Expertise router — CRUD, governance actions (submit / approve / reject / deprecate /
+restore / rollback) and the taxonomy mirror. Writes check the role rules in app/auth.py
+and leave an audit_log row."""
 
 import uuid
 from datetime import datetime, timezone
@@ -6,15 +8,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from ..auth import get_current_user, in_domain, require_contributor, require_governor, require_reviewer_for
 from ..db import get_db
-from ..models import Expertise, ExpertiseVersion, Feedback
-from ..schemas import (
-    ExpertiseCreate,
-    ExpertiseOut,
-    ExpertisePatch,
-    ExpertiseVersionOut,
-    FeedbackOut,
+from ..governance import (
+    add_version, audit, bump_version, load_expertise_out, missing_for_review, one_expertise_out, restore, snapshot,
 )
+from ..models import Expertise, ExpertiseVersion, Profile
+from ..schemas import ApproveIn, ExpertiseCreate, ExpertiseOut, ExpertisePatch, RollbackIn, UsageIn
 
 router = APIRouter(prefix="/api", tags=["expertise"])
 
@@ -66,58 +66,24 @@ def get_taxonomy():
 
 # --- helpers ----------------------------------------------------------------
 
-def _exp_to_out(e: Expertise, versions: list[ExpertiseVersion], feedback_rows: list[Feedback]) -> ExpertiseOut:
-    return ExpertiseOut(
-        id=e.id,
-        name=e.name,
-        domain=e.domain,
-        topic=e.topic,
-        asset_types=e.asset_types or [],
-        related=e.related or [],
-        status=e.status,
-        version=e.version,
-        owner=e.owner,
-        owner_role=e.owner_role,
-        reviewer=e.reviewer,
-        keywords=e.keywords or [],
-        usage_count=e.usage_count,
-        success_rate=e.success_rate,
-        summary=e.summary,
-        when_to_use=e.when_to_use,
-        knowledge=e.knowledge or [],
-        decision_logic=e.decision_logic or [],
-        guardrails=e.guardrails or [],
-        escalation=e.escalation or [],
-        sources=e.sources or [],
-        feedback=e.feedback or [],
-        origin=e.origin,
-        created_at=e.created_at,
-        updated_at=e.updated_at,
-        versions=[
-            ExpertiseVersionOut(
-                id=str(v.id),
-                version=v.version,
-                date=v.date,
-                author=v.author,
-                approved_by=v.approved_by,
-                note=v.note,
-                snapshot=v.snapshot or {},
-            )
-            for v in versions
-        ],
-        feedback_rows=[
-            FeedbackOut(
-                id=str(f.id),
-                expertise_id=f.expertise_id,
-                response_id=f.response_id,
-                user_name=f.user_name,
-                rating=f.rating,
-                comment=f.comment,
-                date=f.date,
-            )
-            for f in feedback_rows
-        ],
-    )
+def _get(db: Session, exp_id: str) -> Expertise:
+    e = db.get(Expertise, exp_id)
+    if not e:
+        raise HTTPException(status_code=404, detail="Expertise not found")
+    return e
+
+
+def _save(db: Session, e: Expertise) -> ExpertiseOut:
+    e.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(e)
+    return one_expertise_out(db, e)
+
+
+def _contributor_or_reviewer(user: Profile, domain: str) -> None:
+    """Drafts may be started by the Reviewer or by an expert in that domain."""
+    if user.role != "reviewer":
+        require_contributor(user, domain)
 
 
 # --- list + create ----------------------------------------------------------
@@ -125,87 +91,160 @@ def _exp_to_out(e: Expertise, versions: list[ExpertiseVersion], feedback_rows: l
 @router.get("/expertise", response_model=list[ExpertiseOut])
 def list_expertise(db: Session = Depends(get_db)):
     rows = db.query(Expertise).order_by(Expertise.created_at).all()
-    return [_exp_to_out(e, [], []) for e in rows]
+    return load_expertise_out(db, rows)
 
 
 @router.get("/expertise/{exp_id}", response_model=ExpertiseOut)
 def get_expertise(exp_id: str, db: Session = Depends(get_db)):
-    e = db.get(Expertise, exp_id)
-    if not e:
-        raise HTTPException(status_code=404, detail="Expertise not found")
-    versions = (
-        db.query(ExpertiseVersion)
-        .filter(ExpertiseVersion.expertise_id == exp_id)
-        .order_by(ExpertiseVersion.date)
-        .all()
-    )
-    feedback_rows = (
-        db.query(Feedback)
-        .filter(Feedback.expertise_id == exp_id)
-        .order_by(Feedback.date.desc())
-        .all()
-    )
-    return _exp_to_out(e, versions, feedback_rows)
+    return one_expertise_out(db, _get(db, exp_id))
 
 
 @router.post("/expertise", response_model=ExpertiseOut, status_code=status.HTTP_201_CREATED)
-def create_expertise(body: ExpertiseCreate, db: Session = Depends(get_db)):
-    e = Expertise(
-        id=body.id or f"exp-{uuid.uuid4().hex[:8]}",
-        name=body.name,
-        domain=body.domain,
-        topic=body.topic,
-        asset_types=body.asset_types,
-        related=body.related,
-        status=body.status,
-        version=body.version,
-        owner=body.owner,
-        owner_role=body.owner_role,
-        reviewer=body.reviewer,
-        keywords=body.keywords,
-        usage_count=body.usage_count,
-        success_rate=body.success_rate,
-        summary=body.summary,
-        when_to_use=body.when_to_use,
-        knowledge=body.knowledge,
-        decision_logic=body.decision_logic,
-        guardrails=body.guardrails,
-        escalation=body.escalation,
-        sources=body.sources,
-        feedback=body.feedback,
-        origin=body.origin,
-    )
+def create_expertise(
+    body: ExpertiseCreate,
+    user: Profile = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _contributor_or_reviewer(user, body.domain)
+    if body.id and db.get(Expertise, body.id):
+        raise HTTPException(status_code=409, detail="Expertise id already exists")
+    data = body.model_dump(exclude={"id", "versions"})
+    # New Expertise always starts as a draft; only the review flow makes it live.
+    data.update(status="draft", version=body.version if body.status == "draft" else "0.1")
+    e = Expertise(id=body.id or f"exp-{uuid.uuid4().hex[:8]}", **data)
     db.add(e)
-    db.flush()
+    audit(db, user, "expertise.create", "expertise", e.id, name=e.name, origin=e.origin)
+    return _save(db, e)
 
-    # persist any seed versions passed in
-    for v in body.versions:
-        db.add(
-            ExpertiseVersion(
-                expertise_id=e.id,
-                version=v.get("version", ""),
-                date=v.get("date"),
-                author=v.get("author", ""),
-                approved_by=v.get("approvedBy"),
-                note=v.get("note", ""),
-                snapshot=v.get("snapshot", {}),
-            )
-        )
 
-    db.commit()
-    db.refresh(e)
-    return _exp_to_out(e, [], [])
+# Content and metadata edits. Status and version change only through the actions below.
+_GOVERNED = {"status", "version", "reviewer", "usage_count", "success_rate"}
 
 
 @router.patch("/expertise/{exp_id}", response_model=ExpertiseOut)
-def patch_expertise(exp_id: str, body: ExpertisePatch, db: Session = Depends(get_db)):
-    e = db.get(Expertise, exp_id)
-    if not e:
-        raise HTTPException(status_code=404, detail="Expertise not found")
+def patch_expertise(
+    exp_id: str,
+    body: ExpertisePatch,
+    user: Profile = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    e = _get(db, exp_id)
     data = body.model_dump(exclude_unset=True, by_alias=False)
+    for k in _GOVERNED:
+        data.pop(k, None)
+    _contributor_or_reviewer(user, e.domain)
+    if "domain" in data:
+        _contributor_or_reviewer(user, data["domain"])
     for k, v in data.items():
         setattr(e, k, v)
-    e.updated_at = datetime.now(timezone.utc)
+    audit(db, user, "expertise.update", "expertise", e.id, fields=sorted(data))
+    return _save(db, e)
+
+
+@router.delete("/expertise/{exp_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_expertise(
+    exp_id: str,
+    user: Profile = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    e = _get(db, exp_id)
+    # deleteBlock in src/lib/permissions.js: live Expertise is deprecated first, never deleted outright.
+    if e.status == "approved":
+        raise HTTPException(status_code=409, detail="Live Expertise can't be deleted. Deprecate it first (Reviewer only).")
+    if user.role != "reviewer" and not (e.status == "draft" and user.role == "contributor" and in_domain(user, e.domain)):
+        raise HTTPException(status_code=403, detail="Only the Reviewer, or a domain expert for a draft, can delete this.")
+    audit(db, user, "expertise.delete", "expertise", e.id, name=e.name)
+    db.delete(e)
     db.commit()
-    db.refresh(e)
-    return _exp_to_out(e, [], [])
+
+
+@router.post("/expertise/usage", status_code=status.HTTP_204_NO_CONTENT)
+def record_usage(body: UsageIn, db: Session = Depends(get_db)):
+    """Counts one use for each Expertise applied to a chat answer."""
+    for e in db.query(Expertise).filter(Expertise.id.in_(body.ids)):
+        e.usage_count = (e.usage_count or 0) + 1
+    db.commit()
+
+
+# --- governance ---------------------------------------------------------------
+
+@router.post("/expertise/{exp_id}/submit", response_model=ExpertiseOut)
+def submit_for_review(exp_id: str, user: Profile = Depends(get_current_user), db: Session = Depends(get_db)):
+    e = _get(db, exp_id)
+    require_contributor(user, e.domain)
+    if e.status != "draft":
+        raise HTTPException(status_code=409, detail=f"Only drafts can be submitted (this one is {e.status}).")
+    missing = missing_for_review(e)
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Not ready for review — still needs: {'; '.join(missing)}")
+    e.status = "in_review"
+    audit(db, user, "expertise.submit", "expertise", e.id)
+    return _save(db, e)
+
+
+@router.post("/expertise/{exp_id}/approve", response_model=ExpertiseOut)
+def approve_expertise(
+    exp_id: str,
+    body: ApproveIn = ApproveIn(),
+    user: Profile = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    e = _get(db, exp_id)
+    require_reviewer_for(user, e.domain, (e.capture or {}).get("capturedBy") or e.owner)
+    e.version = bump_version(e.version)
+    e.status = "approved"
+    e.reviewer = user.name
+    add_version(db, e, author=e.owner, approved_by=user.name, note=body.note, snap=snapshot(e))
+    audit(db, user, "expertise.approve", "expertise", e.id, version=e.version, note=body.note)
+    return _save(db, e)
+
+
+@router.post("/expertise/{exp_id}/reject", response_model=ExpertiseOut)
+def reject_expertise(exp_id: str, user: Profile = Depends(get_current_user), db: Session = Depends(get_db)):
+    e = _get(db, exp_id)
+    require_reviewer_for(user, e.domain, (e.capture or {}).get("capturedBy") or e.owner)
+    e.status = "draft"
+    audit(db, user, "expertise.reject", "expertise", e.id)
+    return _save(db, e)
+
+
+@router.post("/expertise/{exp_id}/deprecate", response_model=ExpertiseOut)
+def deprecate_expertise(exp_id: str, user: Profile = Depends(get_current_user), db: Session = Depends(get_db)):
+    e = _get(db, exp_id)
+    require_governor(user)
+    e.status = "deprecated"
+    audit(db, user, "expertise.deprecate", "expertise", e.id)
+    return _save(db, e)
+
+
+@router.post("/expertise/{exp_id}/restore", response_model=ExpertiseOut)
+def restore_expertise(exp_id: str, user: Profile = Depends(get_current_user), db: Session = Depends(get_db)):
+    e = _get(db, exp_id)
+    require_governor(user)
+    e.status = "approved"
+    audit(db, user, "expertise.restore", "expertise", e.id)
+    return _save(db, e)
+
+
+@router.post("/expertise/{exp_id}/rollback", response_model=ExpertiseOut)
+def rollback_expertise(
+    exp_id: str,
+    body: RollbackIn,
+    user: Profile = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    e = _get(db, exp_id)
+    require_governor(user)
+    target = (
+        db.query(ExpertiseVersion)
+        .filter(ExpertiseVersion.expertise_id == exp_id, ExpertiseVersion.version == body.version)
+        .first()
+    )
+    if not target or not target.snapshot:
+        raise HTTPException(status_code=404, detail=f"No snapshot for v{body.version}")
+    restore(e, target.snapshot)
+    e.version = bump_version(e.version)
+    note = f"Rolled back to v{body.version}"
+    add_version(db, e, author=user.name, approved_by=user.name, note=note, snap=dict(target.snapshot))
+    audit(db, user, "expertise.rollback", "expertise", e.id, to=body.version, version=e.version)
+    return _save(db, e)

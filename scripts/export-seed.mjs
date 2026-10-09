@@ -4,14 +4,13 @@
  * Run from the repo root:  node scripts/export-seed.mjs
  *
  * Produces backend/seed_data.json with:
- *   { expertise: [...], proposals: [...], chats: [...] }
+ *   { users: [...], expertise: [...], proposals: [...], chats: [...] }
  * Each chat includes its nested messages + responses, using the same
  * camelCase shapes the API returns.
  *
- * Note: src/data/expertise.js has an extensionless re-export
- * (`export { TAXONOMY } from './taxonomy'`) that Node ESM can't resolve but
- * Vite can.  We sidestep it by loading the file via a data URL with that
- * line stripped (the rest of expertise.js doesn't use TAXONOMY).
+ * Note: src/data/expertise.js uses extensionless relative imports
+ * (`./taxonomy`, `./expertisePortfolio`) that Vite resolves but Node ESM can't.
+ * We load it via a data URL with those specifiers rewritten to absolute file URLs.
  */
 
 import { writeFileSync, readFileSync } from 'node:fs'
@@ -25,7 +24,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // ---------------------------------------------------------------------------
 const expertisePath = resolve(__dirname, '..', 'src', 'data', 'expertise.js')
 const expSrc = readFileSync(expertisePath, 'utf-8')
-  .replace(/^export \{ TAXONOMY \} from '\.\/taxonomy'\n/m, '')
+  .replace(/from '\.\/(\w+)'/g, (_, name) => `from '${pathToFileURL(resolve(dirname(expertisePath), `${name}.js`)).href}'`)
 const expertiseB64 = Buffer.from(expSrc).toString('base64')
 const expertiseModule = await import(`data:text/javascript;base64,${expertiseB64}`)
 const { SEED_EXPERTISE, SEED_PROPOSALS, CONTENT_FIELDS } = expertiseModule
@@ -33,6 +32,10 @@ const { SEED_EXPERTISE, SEED_PROPOSALS, CONTENT_FIELDS } = expertiseModule
 // chats.js has no imports — safe to load directly via file URL.
 const chatsPath = resolve(__dirname, '..', 'src', 'data', 'chats.js')
 const { SEED_CHATS } = await import(pathToFileURL(chatsPath).href)
+
+// users.js has no imports either: the demo accounts seed.py creates in Supabase Auth + profiles.
+const usersPath = resolve(__dirname, '..', 'src', 'data', 'users.js')
+const { DEMO_USERS, DEMO_PASSWORD } = await import(pathToFileURL(usersPath).href)
 
 // ---------------------------------------------------------------------------
 // Build snapshots for versions (mirrors src/store.js withSnapshots)
@@ -85,6 +88,8 @@ const expertise = withSnapshots(SEED_EXPERTISE).map((e) => ({
   sources: e.sources || [],
   feedback: e.feedback || [],
   origin: e.origin ?? null,
+  capture: e.capture ?? null,
+  authorId: e.authorId ?? null,
   createdAt: e.createdAt,
   updatedAt: e.updatedAt,
   versions: (e.versions || []).map((v) => ({
@@ -110,6 +115,11 @@ const proposals = SEED_PROPOSALS.map((p) => ({
   reason: p.reason,
   changes: p.changes,
   chatId: p.chatId ?? null,
+  authorId: p.authorId ?? null,
+  capture: p.capture ?? null,
+  sources: p.sources || [],
+  meetingId: p.meetingId ?? null,
+  meetingTitle: p.meetingTitle ?? null,
   status: 'open',
 }))
 
@@ -145,10 +155,12 @@ const chats = SEED_CHATS.map((c) => ({
 // ---------------------------------------------------------------------------
 // Write
 // ---------------------------------------------------------------------------
-const out = { expertise, proposals, chats }
+const users = DEMO_USERS.map(({ name, email, role, domains }) => ({ name, email, role, domains, password: DEMO_PASSWORD }))
+const out = { users, expertise, proposals, chats }
 const dest = resolve(__dirname, '..', 'backend', 'seed_data.json')
 writeFileSync(dest, JSON.stringify(out, null, 2), 'utf-8')
 console.log(`Wrote ${dest}`)
+console.log(`  users:     ${users.length}`)
 console.log(`  expertise: ${expertise.length}`)
 console.log(`  proposals: ${proposals.length}`)
 console.log(`  chats:     ${chats.length}`)
