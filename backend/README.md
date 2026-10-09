@@ -55,5 +55,5 @@ Events, in order: `meta {expertise: [{id, version}]}` (the Expertise actually ap
   matched Expertise with each request. Chats and Expertise still live in browser storage.
   Prompt 1 in `docs/BUILD_PROMPTS.md` (database) moves them server-side.
 - Expertise matching is still the front end's keyword match. Prompt 3 replaces it.
-- Attached files and the web-search toggle are not sent to Claude yet.
+- Attached files are not sent to Claude yet; web search is not implemented.
 - GPT, Gemini, Grok, Hunyuan and DeepSeek are still mocked.

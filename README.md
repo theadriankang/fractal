@@ -47,7 +47,7 @@ retrieval and preservation of saved state during the demo upgrade.
 - **Compare** — the **+** next to the model picker adds up to 3 models side by side.
 - **Expertise applied** chips under every answer show which Expertise (and which version) grounded it — click through to the source.
 - **`#` in the composer** attaches a specific approved Expertise manually.
-- Attach files, toggle web search (UI only), copy, regenerate, 👍/👎.
+- Attach files, copy, regenerate, 👍/👎.
 - **👎 + correction** → becomes a *proposed revision* in the Review Queue.
 - **"Fractal noticed reusable know-how"** card — when someone *shares* know-how in a chat ("we always…", "in my experience…"), Fractal offers to save it as a draft Expertise (or a revision to an existing one), with the conversation linked as a source.
 

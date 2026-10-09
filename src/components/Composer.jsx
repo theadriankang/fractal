@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, Plus, Globe, BookOpenCheck, Mic, X, FileText, Sparkles, Hash } from 'lucide-react'
+import { ArrowUp, Square, Plus, BookOpenCheck, Mic, X, FileText, Sparkles, Hash } from 'lucide-react'
 import { useStore } from '../store'
 import { routeAuto, getModel } from '../data/models'
 import { ProviderIcon } from './ui'
@@ -12,7 +12,6 @@ export default function Composer({
   const [text, setText] = useState('')
   const [files, setFiles] = useState([])
   const [attached, setAttached] = useState(initialAttached)
-  const [web, setWeb] = useState(false)
   const [picker, setPicker] = useState(null) // null | { query }
   const [pickIdx, setPickIdx] = useState(0)
   const ta = useRef(null)
@@ -49,7 +48,7 @@ export default function Composer({
 
   const send = () => {
     if (!text.trim() || streaming) return
-    onSend(text.trim(), { attachedExpertise: attached, files, webSearch: web })
+    onSend(text.trim(), { attachedExpertise: attached, files })
     setText(''); setFiles([]); setAttached([])
   }
 
@@ -126,12 +125,6 @@ export default function Composer({
             onChange={(e) => { setFiles((f) => [...f, ...[...e.target.files].map((x) => ({ name: x.name, size: x.size }))]); e.target.value = '' }}
           />
           <button className="icon-btn" title="Attach files" onClick={() => fileRef.current.click()}><Plus size={18} /></button>
-          <button
-            className={`btn rounded-full px-2.5 py-1 text-xs ${web ? 'bg-sky-500/15 text-sky-500 ring-1 ring-sky-500/30' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-            onClick={() => setWeb(!web)}
-          >
-            <Globe size={14} /> Web search
-          </button>
           {allowExpertise && (
           <button
             className="btn rounded-full px-2.5 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
