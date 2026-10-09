@@ -6,7 +6,17 @@ import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfo
 import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
-import { isLive, streamChat, extractKnowhow, setActiveEmail } from './lib/api'
+import {
+  isLive, streamChat, extractKnowhow, setActiveEmail,
+  USE_MOCK, ApiError, isOffline,
+  listExpertise, getExpertise, createExpertiseApi, patchExpertiseApi,
+  submitExpertiseApi, approveExpertiseApi, rejectExpertiseApi,
+  deprecateExpertiseApi, restoreExpertiseApi, rollbackExpertiseApi,
+  postFeedbackApi,
+  listProposals, createProposalApi, approveProposalApi, rejectProposalApi,
+  listAudit, getTaxonomyApi,
+  listChatsApi, createChatApi, patchChatApi, deleteChatApi,
+} from './lib/api'
 import { DEMO_USERS, authenticate, userById } from './data/users'
 import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit, deleteBlock } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
@@ -44,6 +54,40 @@ function withSnapshots(list) {
 }
 
 const streams = new Map() // msgId -> [cancelFns]
+
+// ---------------------------------------------------------------------------
+// Backend data loading helpers.  In mock mode these are no-ops; the seed
+// data already in the store is used.  When the backend is reachable they
+// replace the seed/expertise list with live server data.
+// ---------------------------------------------------------------------------
+
+const OFFLINE_MSG = 'Backend offline: switch VITE_USE_MOCK=true for demo mode'
+
+/** Normalise a backend ExpertiseOut row to the frontend shape (camelCase is already correct). */
+function normaliseExpertise(e) {
+  return {
+    ...e,
+    assetTypes: e.assetTypes || e.asset_types || [],
+    ownerRole: e.ownerRole ?? e.owner_role ?? '',
+    usageCount: e.usageCount ?? e.usage_count ?? 0,
+    successRate: e.successRate ?? e.success_rate ?? null,
+    whenToUse: e.whenToUse ?? e.when_to_use ?? '',
+    decisionLogic: e.decisionLogic ?? e.decision_logic ?? [],
+    feedbackRows: e.feedbackRows ?? e.feedback_rows ?? [],
+    versions: e.versions || [],
+    feedback: e.feedback || [],
+  }
+}
+
+/** Normalise a backend ProposalOut row. */
+function normaliseProposal(p) {
+  return {
+    ...p,
+    expertiseId: p.expertiseId ?? p.expertise_id ?? p.expertiseId,
+    createdAt: p.createdAt ?? p.created_at ?? p.createdAt,
+    chatId: p.chatId ?? p.chat_id ?? p.chatId,
+  }
+}
 
 const HISTORY_TURNS = 20
 
@@ -179,6 +223,7 @@ export const useStore = create(
         if (!u) return { error: 'Incorrect email or password.' }
         set((s) => ({ user: u, session: { activeId: u.id, signedIn: [...new Set([...(s.session?.signedIn || []), u.id])] } }))
         setActiveEmail(u.email)
+        get().loadBackendData()
         return { user: u }
       },
       switchAccount: (id) => {
@@ -186,6 +231,7 @@ export const useStore = create(
         if (!u || !get().session.signedIn.includes(id)) return
         set((s) => ({ user: u, session: { ...s.session, activeId: id } }))
         setActiveEmail(u.email)
+        get().loadBackendData()
         get().showToast(`Switched to ${u.name}`)
       },
       // Signs out the active account; falls back to another signed-in account, else the sign-in page.
@@ -195,6 +241,7 @@ export const useStore = create(
         const next = userById(signedIn[0])
         set({ user: next, session: { activeId: next?.id || null, signedIn } })
         setActiveEmail(next?.email || null)
+        if (next) get().loadBackendData()
         return next
       },
       logoutAll: () => {
@@ -202,17 +249,75 @@ export const useStore = create(
         setActiveEmail(null)
       },
 
+      // Load expertise, proposals, taxonomy and chats from the backend.
+      // In mock mode this is a no-op — seed data stays.  On offline, keep
+      // whatever is already in the store and show a toast.
+      loadBackendData: async () => {
+        if (USE_MOCK) return
+        try {
+          const [exp, props] = await Promise.all([
+            listExpertise().then((rows) => rows.map(normaliseExpertise)),
+            listProposals().then((rows) => rows.map(normaliseProposal)),
+          ])
+          set({ expertise: exp, proposals: props })
+        } catch (err) {
+          if (isOffline(err)) get().showToast(OFFLINE_MSG)
+          else get().showToast(err.message)
+        }
+        // Chats: the backend supports chat CRUD but not individual message
+        // persistence, so we load the chat list (with any saved messages)
+        // and merge with local-only chats.
+        try {
+          const remoteChats = await listChatsApi()
+          set((s) => {
+            const localIds = new Set(remoteChats.map((c) => c.id))
+            const locals = s.chats.filter((c) => !localIds.has(c.id))
+            return {
+              chats: [...remoteChats.map((c) => ({
+                ...c,
+                ownerId: s.user?.id,
+                updatedAt: c.updatedAt || c.updated_at || now(),
+                messages: (c.messages || []).map((m) => ({
+                  ...m,
+                  responses: (m.responses || []).map((r) => ({
+                    ...r,
+                    modelId: r.modelId ?? r.model_id ?? '',
+                    expertise: r.expertiseUsed ?? r.expertise_used ?? [],
+                    streaming: false,
+                  })),
+                })),
+              })), ...locals],
+            }
+          })
+        } catch {
+          // Chats stay local — no toast (already shown for expertise if offline)
+        }
+      },
+
       setSelectedModels: (ids) => set({ selectedModels: ids.length ? ids : ['auto'] }),
 
       // ---------------- chats ----------------
       newChat: () => {
         const id = uid('chat')
-        set((s) => ({ chats: [{ id, ownerId: get().user?.id, title: 'New Chat', folder: null, updatedAt: now(), messages: [] }, ...s.chats] }))
+        const chat = { id, ownerId: get().user?.id, title: 'New Chat', folder: null, updatedAt: now(), messages: [] }
+        set((s) => ({ chats: [chat, ...s.chats] }))
+        if (!USE_MOCK) createChatApi({ id, title: 'New Chat', pinned: false }).catch(() => {})
         return id
       },
-      renameChat: (id, title) => set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, title } : c)) })),
-      togglePin: (id) => set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, pinned: !c.pinned } : c)) })),
-      deleteChat: (id) => set((s) => ({ chats: s.chats.filter((c) => c.id !== id) })),
+      renameChat: (id, title) => {
+        set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, title } : c)) }))
+        if (!USE_MOCK) patchChatApi(id, { title }).catch(() => {})
+      },
+      togglePin: (id) => {
+        const chat = get().chats.find((c) => c.id === id)
+        const pinned = !chat?.pinned
+        set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, pinned } : c)) }))
+        if (!USE_MOCK) patchChatApi(id, { pinned }).catch(() => {})
+      },
+      deleteChat: (id) => {
+        set((s) => ({ chats: s.chats.filter((c) => c.id !== id) }))
+        if (!USE_MOCK) deleteChatApi(id).catch(() => {})
+      },
 
       patchChat: (chatId, fn) =>
         set((s) => ({ chats: s.chats.map((c) => (c.id === chatId ? fn(c) : c)) })),
@@ -295,6 +400,8 @@ export const useStore = create(
         if (!r.expertise.length) return
         const { id: userId, name: user } = get().user
         const key = responseKey(msgId, idx, r)
+
+        // Optimistically update local feedback + successRate.
         set((s) => ({
           expertise: s.expertise.map((e) => {
             const ref = r.expertise.find((x) => x.id === e.id)
@@ -304,6 +411,32 @@ export const useStore = create(
             return { ...e, feedback, successRate: helpfulStats({ feedback }).rate }
           }),
         }))
+
+        // Through the API: POST /api/expertise/:id/feedback handles both the
+        // feedback row and the auto-created down-vote correction proposal.
+        if (!USE_MOCK && next) {
+          const target = r.expertise[0].id
+          postFeedbackApi(target, { rating: next, comment, chatId })
+            .then((updated) => {
+              set((s) => ({
+                expertise: s.expertise.map((e) => (e.id === target ? normaliseExpertise(updated) : e)),
+              }))
+              if (next === 'down' && comment.trim()) {
+                get().showToast('Correction sent to the Review Queue')
+                // Refresh proposals so the new correction proposal appears.
+                listProposals()
+                  .then((rows) => set({ proposals: rows.map(normaliseProposal) }))
+                  .catch(() => {})
+              }
+            })
+            .catch((err) => {
+              if (isOffline(err)) get().showToast(OFFLINE_MSG)
+              else get().showToast(err.message)
+            })
+          return
+        }
+
+        // Mock / offline fallback: create the proposal locally.
         if (next === 'down' && comment.trim()) {
           const target = r.expertise[0].id
           const te = get().expertise.find((e) => e.id === target)
@@ -371,7 +504,7 @@ export const useStore = create(
       //   edits = { items: [{field, text, quote, include}], extras: [{field, text}], draft: {name, domain, topic} }
       // 'new' → auto-detected draft Expertise; 'revision' → proposal in the Review Queue.
       // Only a contributor who is an expert in the target domain may do this.
-      acceptDetection: (chatId, msgId, edits = {}) => {
+      acceptDetection: async (chatId, msgId, edits = {}) => {
         const user = get().user
         const chat = get().chats.find((c) => c.id === chatId)
         const i = chat.messages.findIndex((m) => m.id === msgId)
@@ -396,14 +529,34 @@ export const useStore = create(
 
         let result
         if (det.kind === 'new') {
-          const id = get().createExpertise({
-            name: draftMeta.name, domain: draftMeta.domain, topic: draftMeta.topic,
-            assetTypes: draftMeta.assetTypes?.length ? draftMeta.assetTypes : ['Office'],
-            summary: draftMeta.summary || '', whenToUse: draftMeta.whenToUse || '', keywords: draftMeta.keywords || [],
-            knowledge: pick('knowledge'), decisionLogic: pick('decisionLogic'), guardrails: pick('guardrails'), escalation: pick('escalation'),
-            origin: 'auto-detected', capture, sources: [source],
-          })
-          result = { kind: 'new', id, missing: readiness(get().expertise.find((e) => e.id === id)).missing.map((m) => m.label) }
+          // Through the API: POST /api/expertise creates the draft in the shared DB.
+          if (!USE_MOCK) {
+            try {
+              const created = await createExpertiseApi({
+                name: draftMeta.name, domain: draftMeta.domain, topic: draftMeta.topic,
+                assetTypes: draftMeta.assetTypes?.length ? draftMeta.assetTypes : ['Office'],
+                summary: draftMeta.summary || '', whenToUse: draftMeta.whenToUse || '', keywords: draftMeta.keywords || [],
+                knowledge: pick('knowledge'), decisionLogic: pick('decisionLogic'), guardrails: pick('guardrails'), escalation: pick('escalation'),
+                origin: 'auto-detected', sources: [source],
+              })
+              const norm = normaliseExpertise(created)
+              set((s) => ({ expertise: [norm, ...s.expertise] }))
+              result = { kind: 'new', id: norm.id, missing: readiness(norm).missing.map((m) => m.label) }
+            } catch (err) {
+              if (isOffline(err)) get().showToast(OFFLINE_MSG)
+              else get().showToast(err.message)
+              return null
+            }
+          } else {
+            const id = get().createExpertise({
+              name: draftMeta.name, domain: draftMeta.domain, topic: draftMeta.topic,
+              assetTypes: draftMeta.assetTypes?.length ? draftMeta.assetTypes : ['Office'],
+              summary: draftMeta.summary || '', whenToUse: draftMeta.whenToUse || '', keywords: draftMeta.keywords || [],
+              knowledge: pick('knowledge'), decisionLogic: pick('decisionLogic'), guardrails: pick('guardrails'), escalation: pick('escalation'),
+              origin: 'auto-detected', capture, sources: [source],
+            })
+            result = { kind: 'new', id, missing: readiness(get().expertise.find((e) => e.id === id)).missing.map((m) => m.label) }
+          }
         } else {
           const changes = {}
           for (const x of all) {
@@ -412,15 +565,34 @@ export const useStore = create(
             changes[x.field].add.push(x.text.trim())
           }
           if (!Object.keys(changes).length) { get().showToast(`${target.name} already contains these lines`); return null }
-          const id = uid('prop')
-          set((s) => ({
-            proposals: [
-              { id, expertiseId: target.id, type: 'revision', createdAt: now(), author: `${user.name} (captured from chat)`, authorId: user.id,
-                reason: det.reason || 'New know-how shared during a conversation.', changes, chatId, capture, sources: [source] },
-              ...s.proposals,
-            ],
-          }))
-          result = { kind: 'revision', id, missing: [] }
+          // Through the API: POST /api/proposals creates the revision proposal.
+          if (!USE_MOCK) {
+            try {
+              const created = await createProposalApi({
+                expertiseId: target.id,
+                reason: det.reason || 'New know-how shared during a conversation.',
+                changes,
+                chatId,
+              })
+              const norm = normaliseProposal(created)
+              set((s) => ({ proposals: [norm, ...s.proposals] }))
+              result = { kind: 'revision', id: norm.id, missing: [] }
+            } catch (err) {
+              if (isOffline(err)) get().showToast(OFFLINE_MSG)
+              else get().showToast(err.message)
+              return null
+            }
+          } else {
+            const id = uid('prop')
+            set((s) => ({
+              proposals: [
+                { id, expertiseId: target.id, type: 'revision', createdAt: now(), author: `${user.name} (captured from chat)`, authorId: user.id,
+                  reason: det.reason || 'New know-how shared during a conversation.', changes, chatId, capture, sources: [source] },
+                ...s.proposals,
+              ],
+            }))
+            result = { kind: 'revision', id, missing: [] }
+          }
         }
         get().patchMessage(chatId, msgId, (m) => ({ ...m, detectionState: 'saved', detectionResult: result.id, detectionMissing: result.missing }))
         return result
@@ -460,11 +632,29 @@ export const useStore = create(
         }
         if (!e.keywords.length) e.keywords = e.name.toLowerCase().split(/\W+/).filter((w) => w.length > 3)
         set((s) => ({ expertise: [e, ...s.expertise] }))
+        // Also persist through the API so it appears in the shared DB.
+        if (!USE_MOCK) {
+          createExpertiseApi({
+            id: e.id, name: e.name, domain: e.domain, topic: e.topic,
+            assetTypes: e.assetTypes, related: e.related, status: e.status, version: e.version,
+            owner: e.owner, ownerRole: e.ownerRole, keywords: e.keywords,
+            summary: e.summary, whenToUse: e.whenToUse,
+            knowledge: e.knowledge, decisionLogic: e.decisionLogic,
+            guardrails: e.guardrails, escalation: e.escalation,
+            sources: e.sources, origin: e.origin,
+          }).catch((err) => { if (!isOffline(err)) get().showToast(err.message) })
+        }
         return id
       },
 
-      updateExpertise: (id, patch) =>
-        set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? { ...e, ...patch, updatedAt: now() } : e)) })),
+      updateExpertise: (id, patch) => {
+        set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? { ...e, ...patch, updatedAt: now() } : e)) }))
+        // Persist metadata changes through the API (content changes on approved
+        // Expertise are auto-routed to a proposal by the backend).
+        if (!USE_MOCK) {
+          patchExpertiseApi(id, patch).catch(() => {})
+        }
+      },
 
       // Live Expertise is never deleted outright: it is deprecated first (reversible), and only then
       // can the Reviewer delete it. Drafts can be deleted by the Reviewer or an expert in the domain.
@@ -476,7 +666,7 @@ export const useStore = create(
           expertise: s.expertise.filter((x) => x.id !== id),
           proposals: s.proposals.filter((p) => p.expertiseId !== id),
         }))
-        get().showToast(`Deleted “${e.name}”`)
+        get().showToast(`Deleted "${e.name}"`)
         return true
       },
 
@@ -487,6 +677,11 @@ export const useStore = create(
         const r = readiness(e)
         if (!r.ready) { get().showToast(`Not ready for review — still needs: ${r.missing.map((m) => m.label.toLowerCase()).join('; ')}`); return }
         get().updateExpertise(id, { status: 'in_review' })
+        if (!USE_MOCK) {
+          submitExpertiseApi(id)
+            .then((updated) => set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? normaliseExpertise(updated) : e)) })))
+            .catch((err) => { if (isOffline(err)) get().showToast(OFFLINE_MSG); else get().showToast(err.message) })
+        }
         get().showToast('Submitted for review')
       },
 
@@ -494,6 +689,15 @@ export const useStore = create(
         const e = get().expertise.find((x) => x.id === id)
         const block = reviewBlock(get().user, e?.domain, e)
         if (block) { get().showToast(block); return }
+        if (!USE_MOCK) {
+          approveExpertiseApi(id, note)
+            .then((updated) => {
+              set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? normaliseExpertise(updated) : e)) }))
+              get().showToast(`Approved — v${updated.version} is live`)
+            })
+            .catch((err) => { if (isOffline(err)) get().showToast(OFFLINE_MSG); else get().showToast(err.message) })
+          return
+        }
         const version = bumpVersion(e.version)
         get().updateExpertise(id, {
           status: 'approved',
@@ -508,24 +712,51 @@ export const useStore = create(
         const e = get().expertise.find((x) => x.id === id)
         const block = reviewBlock(get().user, e?.domain, e)
         if (block) { get().showToast(block); return }
+        if (!USE_MOCK) {
+          rejectExpertiseApi(id)
+            .then((updated) => set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? normaliseExpertise(updated) : e)) })))
+            .catch((err) => { if (isOffline(err)) get().showToast(OFFLINE_MSG); else get().showToast(err.message) })
+          return
+        }
         get().updateExpertise(id, { status: 'draft' })
         get().showToast('Sent back to draft')
       },
 
       deprecateExpertise: (id) => {
         if (!canGovern(get().user)) { get().showToast('Only the Reviewer can deprecate Expertise.'); return }
+        if (!USE_MOCK) {
+          deprecateExpertiseApi(id)
+            .then((updated) => set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? normaliseExpertise(updated) : e)) })))
+            .catch((err) => { if (isOffline(err)) get().showToast(OFFLINE_MSG); else get().showToast(err.message) })
+          return
+        }
         get().updateExpertise(id, { status: 'deprecated' })
         get().showToast('Expertise deprecated')
       },
 
       restoreExpertise: (id) => {
         if (!canGovern(get().user)) { get().showToast('Only the Reviewer can restore Expertise.'); return }
+        if (!USE_MOCK) {
+          restoreExpertiseApi(id)
+            .then((updated) => set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? normaliseExpertise(updated) : e)) })))
+            .catch((err) => { if (isOffline(err)) get().showToast(OFFLINE_MSG); else get().showToast(err.message) })
+          return
+        }
         get().updateExpertise(id, { status: 'approved' })
         get().showToast('Expertise restored')
       },
 
       rollbackExpertise: (id, toVersion) => {
         if (!canGovern(get().user)) { get().showToast('Only the Reviewer can roll back Expertise.'); return }
+        if (!USE_MOCK) {
+          rollbackExpertiseApi(id, toVersion)
+            .then((updated) => {
+              set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? normaliseExpertise(updated) : e)) }))
+              get().showToast(`Rolled back — now v${updated.version}`)
+            })
+            .catch((err) => { if (isOffline(err)) get().showToast(OFFLINE_MSG); else get().showToast(err.message) })
+          return
+        }
         const e = get().expertise.find((x) => x.id === id)
         const target = e.versions.find((v) => v.version === toVersion)
         if (!target?.snapshot) return
@@ -546,6 +777,20 @@ export const useStore = create(
         const e = get().expertise.find((x) => x.id === p.expertiseId)
         const block = reviewBlock(get().user, e?.domain, p)
         if (block) { get().showToast(block); return }
+        if (!USE_MOCK) {
+          approveProposalApi(pid)
+            .then(async (updated) => {
+              // Refresh the expertise from the server so we get the new version + snapshot.
+              const exp = await getExpertise(p.expertiseId)
+              set((s) => ({
+                expertise: s.expertise.map((e) => (e.id === p.expertiseId ? normaliseExpertise(exp) : e)),
+                proposals: s.proposals.filter((x) => x.id !== pid),
+              }))
+              get().showToast(`Revision merged — ${e.name} v${exp.version}`)
+            })
+            .catch((err) => { if (isOffline(err)) get().showToast(OFFLINE_MSG); else get().showToast(err.message) })
+          return
+        }
         const patch = {}
         for (const [field, { add = [], remove = [] }] of Object.entries(p.changes)) {
           patch[field] = [...e[field].filter((x) => !remove.includes(x)), ...add]
@@ -555,7 +800,6 @@ export const useStore = create(
         get().updateExpertise(e.id, {
           ...patch,
           version,
-          // provenance (e.g. the meeting a revision came from) follows the change into the Expertise
           ...(p.sources?.length ? { sources: [...p.sources, ...e.sources] } : {}),
           versions: [...e.versions, { version, date: now(), author: p.author, approvedBy: get().user.name, note: p.reason, snapshot: snapshot(merged) }],
         })
@@ -567,6 +811,13 @@ export const useStore = create(
         const e = get().expertise.find((x) => x.id === expertiseId)
         const block = contributeBlock(get().user, e?.domain)
         if (block) { get().showToast(block); return }
+        if (!USE_MOCK) {
+          createProposalApi({ expertiseId, reason, changes })
+            .then((created) => set((s) => ({ proposals: [normaliseProposal(created), ...s.proposals] })))
+            .catch((err) => { if (isOffline(err)) get().showToast(OFFLINE_MSG); else get().showToast(err.message) })
+          get().showToast('Changes sent to the Review Queue')
+          return
+        }
         set((s) => ({
           proposals: [
             { id: uid('prop'), expertiseId, type: 'revision', createdAt: now(), author: get().user.name, authorId: get().user.id, reason, changes },
@@ -608,24 +859,34 @@ export const useStore = create(
             changes[l.field] ??= { add: [], remove: [] }
             if (!changes[l.field].add.includes(l.entry)) changes[l.field].add.push(l.entry)
           }
-          proposals.push({
-            id: uid('prop'),
-            expertiseId,
-            type: 'revision',
-            createdAt: now(),
-            author: `${user} (captured from meeting)`,
-            authorId: get().user.id,
-            reason: `Know-how from meeting "${title}" — routed by the category selector.`,
-            changes,
-            meetingId,
-            meetingTitle: title,
-            sources: ls.map((l) => source(l.takeaway || l.entry)),
-          })
+          if (!USE_MOCK) {
+            // Through the API so it lands in the shared Review Queue.
+            createProposalApi({
+              expertiseId, reason: `Know-how from meeting "${title}" — routed by the category selector.`, changes,
+            }).then((created) => {
+              set((s) => ({ proposals: [normaliseProposal(created), ...s.proposals] }))
+            }).catch(() => {})
+          } else {
+            proposals.push({
+              id: uid('prop'),
+              expertiseId,
+              type: 'revision',
+              createdAt: now(),
+              author: `${user} (captured from meeting)`,
+              authorId: get().user.id,
+              reason: `Know-how from meeting "${title}" — routed by the category selector.`,
+              changes,
+              meetingId,
+              meetingTitle: title,
+              sources: ls.map((l) => source(l.takeaway || l.entry)),
+            })
+          }
         }
         const drafts = []
         for (const ls of byNew.values()) {
           const { name, domain, topic } = ls[0].newExpertise
           const pick = (f) => ls.filter((l) => l.field === f).map((l) => l.entry)
+          // createExpertise already persists through the API when not in mock mode.
           drafts.push(get().createExpertise({
             name, domain, topic,
             origin: 'auto-detected',
@@ -638,7 +899,7 @@ export const useStore = create(
           }))
         }
         if (proposals.length) set((s) => ({ proposals: [...proposals, ...s.proposals] }))
-        return { proposals: proposals.length, drafts: drafts.length, skipped }
+        return { proposals: proposals.length + (USE_MOCK ? 0 : byExisting.size), drafts: drafts.length, skipped }
       },
 
       rejectProposal: (pid) => {
@@ -646,6 +907,13 @@ export const useStore = create(
         const e = get().expertise.find((x) => x.id === p?.expertiseId)
         const block = reviewBlock(get().user, e?.domain, p)
         if (block) { get().showToast(block); return }
+        if (!USE_MOCK) {
+          rejectProposalApi(pid)
+            .then(() => set((s) => ({ proposals: s.proposals.filter((x) => x.id !== pid) })))
+            .catch((err) => { if (isOffline(err)) get().showToast(OFFLINE_MSG); else get().showToast(err.message) })
+          get().showToast('Proposal rejected')
+          return
+        }
         set((s) => ({ proposals: s.proposals.filter((x) => x.id !== pid) }))
         get().showToast('Proposal rejected')
       },
@@ -661,12 +929,12 @@ export const useStore = create(
       // v3 adds portfolio fixtures once without overwriting existing work.
       migrate: (state, version) => migrateDemoState(state, version, withSnapshots(PORTFOLIO_EXPERTISE), PORTFOLIO_PROPOSALS),
       partialize: (s) => ({
-        chats: s.chats,
-        expertise: s.expertise,
-        proposals: s.proposals,
-        settings: s.settings,
-        session: s.session,
-        selectedModels: s.selectedModels,
+        // In mock mode, persist everything (demo data stays between reloads).
+        // When connected to the backend, persist only settings, selectedModels
+        // and session — expertise/proposals/chats come from the server.
+        ...(USE_MOCK
+          ? { chats: s.chats, expertise: s.expertise, proposals: s.proposals, settings: s.settings, session: s.session, selectedModels: s.selectedModels }
+          : { settings: s.settings, session: s.session, selectedModels: s.selectedModels }),
       }),
       // Any stream interrupted by a reload is marked finished.
       onRehydrateStorage: () => (state) => {
@@ -685,6 +953,11 @@ export const useStore = create(
             return out.detectionState === 'checking' ? { ...out, detectionState: null } : out
           }),
         }))
+        // When connected to the backend and a user is signed in, load live data
+        // on app start.  Deferred so the store is ready.
+        if (!USE_MOCK && state.user) {
+          setTimeout(() => { useStore.getState().loadBackendData() }, 0)
+        }
       },
     },
   ),
