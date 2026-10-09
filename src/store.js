@@ -6,7 +6,7 @@ import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfo
 import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
-import { isLive, streamChat, extractKnowhow } from './lib/api'
+import { isLive, streamChat, extractKnowhow, setActiveEmail } from './lib/api'
 import { DEMO_USERS, authenticate, userById } from './data/users'
 import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
@@ -177,12 +177,14 @@ export const useStore = create(
         const u = authenticate(email, password)
         if (!u) return { error: 'Incorrect email or password.' }
         set((s) => ({ user: u, session: { activeId: u.id, signedIn: [...new Set([...(s.session?.signedIn || []), u.id])] } }))
+        setActiveEmail(u.email)
         return { user: u }
       },
       switchAccount: (id) => {
         const u = userById(id)
         if (!u || !get().session.signedIn.includes(id)) return
         set((s) => ({ user: u, session: { ...s.session, activeId: id } }))
+        setActiveEmail(u.email)
         get().showToast(`Switched to ${u.name}`)
       },
       // Signs out the active account; falls back to another signed-in account, else the sign-in page.
@@ -191,9 +193,13 @@ export const useStore = create(
         const signedIn = session.signedIn.filter((id) => id !== session.activeId)
         const next = userById(signedIn[0])
         set({ user: next, session: { activeId: next?.id || null, signedIn } })
+        setActiveEmail(next?.email || null)
         return next
       },
-      logoutAll: () => set({ user: null, session: { activeId: null, signedIn: [] } }),
+      logoutAll: () => {
+        set({ user: null, session: { activeId: null, signedIn: [] } })
+        setActiveEmail(null)
+      },
 
       setSelectedModels: (ids) => set({ selectedModels: ids.length ? ids : ['auto'] }),
 
@@ -658,6 +664,7 @@ export const useStore = create(
         const session = state.session?.signedIn ? state.session : { activeId: null, signedIn: [] }
         state.session = { ...session, signedIn: session.signedIn.filter((id) => userById(id)) }
         state.user = userById(state.session.activeId)
+        setActiveEmail(state.user?.email || null)
         state.chats = state.chats.map((c) => ({
           ...c,
           messages: c.messages.map((m) => {
