@@ -39,6 +39,7 @@ async def chat_stream(req: ChatStreamRequest):
     Accepts any available model id from the catalogue plus "auto"
     (resolves to claude-sonnet for now).
     """
+    is_auto = req.model == "auto"
     resolved_id = registry.resolve_auto(req.model)
     entry = registry.get(resolved_id)
     if entry is None:
@@ -55,7 +56,11 @@ async def chat_stream(req: ChatStreamRequest):
     system = build_system_prompt(applied)
 
     async def events():
-        yield sse("meta", {"expertise": [{"id": e.id, "version": e.version} for e in applied]})
+        yield sse("meta", {
+            "modelId": resolved_id,
+            "auto": is_auto,
+            "expertise": [{"id": e.id, "version": e.version} for e in applied],
+        })
         try:
             async for kind, data in registry.stream_reply(entry, system, messages):
                 yield sse(kind, data)

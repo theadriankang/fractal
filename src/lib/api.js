@@ -10,6 +10,9 @@ export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 // existing mock fallback so the front end always works, even with no keys.
 let _liveModels = new Set()
 let _fetched = false
+let _retryTimer = null
+let _lastRetry = 0
+const _RETRY_MS = 10_000
 
 async function refreshLiveModels() {
   if (_fetched) return
@@ -18,11 +21,11 @@ async function refreshLiveModels() {
     if (res.ok) {
       const list = await res.json()
       _liveModels = new Set(list.filter((m) => m.available).map((m) => m.id))
+      _fetched = true
     }
   } catch {
     // Backend offline — leave _liveModels empty; isLive returns false.
   }
-  _fetched = true
 }
 
 // Kick off the fetch eagerly (fire-and-forget).
@@ -30,7 +33,17 @@ refreshLiveModels()
 
 /** True when this model's answers come from the backend rather than the mock. */
 export function isLive(modelId) {
-  return !USE_MOCK && _liveModels.has(modelId)
+  if (USE_MOCK) return false
+  if (!_fetched) {
+    // Throttle retries so a late-starting backend eventually serves real models.
+    const now = Date.now()
+    if (now - _lastRetry >= _RETRY_MS) {
+      _lastRetry = now
+      clearTimeout(_retryTimer)
+      _retryTimer = setTimeout(() => { refreshLiveModels() }, 0)
+    }
+  }
+  return _liveModels.has(modelId)
 }
 
 /** Re-fetch the live model list from the backend (returns a promise). */
