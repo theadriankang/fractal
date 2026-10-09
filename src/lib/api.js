@@ -163,3 +163,82 @@ export function streamChat({ model, messages, expertise = [], routing }, { onMet
 
   return () => ctrl.abort()
 }
+
+// ---------------------------------------------------------------------------
+// Library, Review Queue and Chats — stored in Supabase through the backend.
+// Until Supabase Auth (BUILD_PROMPTS Prompt 8) the demo account is sent as X-User-Email;
+// backend/seed.py creates a matching profile for every account in src/data/users.js.
+// ---------------------------------------------------------------------------
+
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message)
+    this.status = status // 0 = backend unreachable
+  }
+}
+
+async function request(user, method, path, body) {
+  let res
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(user?.email ? { 'X-User-Email': user.email } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    throw new ApiError('Backend offline.', 0)
+  }
+  if (res.status === 204) return null
+  const data = await res.json().catch(() => null)
+  // Vite's proxy answers with a non-JSON 5xx when nothing listens on /api.
+  if (!res.ok) throw new ApiError(typeof data?.detail === 'string' ? data.detail : `Backend error (${res.status}).`, data ? res.status : 0)
+  return data
+}
+
+// Fields an edit may change; status, version, feedback and usage change only through the actions below.
+const EDITABLE = ['name', 'domain', 'topic', 'assetTypes', 'related', 'owner', 'ownerRole', 'keywords', 'summary', 'whenToUse',
+  'knowledge', 'decisionLogic', 'guardrails', 'escalation', 'sources', 'origin']
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
+const enc = encodeURIComponent
+
+const toApiMessage = (m) => ({
+  ...pick(m, ['role', 'files', 'attachedExpertise', 'webSearch', 'detection', 'detectionState', 'detectionResult', 'createdAt']),
+  content: m.content || '',
+  detectionMissing: m.detectionMissing || [],
+  responses: (m.responses || []).map((r) => ({
+    id: r.id, modelId: r.modelId, auto: r.auto, expertiseUsed: r.expertise || [], content: r.content || '', rating: r.rating,
+  })),
+})
+
+const fromApiMessage = ({ responses, ...m }) =>
+  m.role === 'user'
+    ? m
+    : { ...m, responses: responses.map(({ expertiseUsed, ...r }) => ({ ...r, expertise: expertiseUsed, streaming: false })) }
+
+/** A chat from the API in the store's shape; `ownerId` is the signed-in demo account. */
+export const fromApiChat = (c, ownerId) => ({ ...c, ownerId, messages: c.messages.map(fromApiMessage) })
+
+/** Endpoint wrappers acting as `user` (bound when a write is queued, so it keeps its author). */
+export function apiFor(user) {
+  const call = (method, path, body) => request(user, method, path, body)
+  return {
+    listChats: () => call('GET', '/chats'),
+    saveChat: (c) => call('PUT', `/chats/${enc(c.id)}`, { title: c.title, folder: c.folder ?? null, pinned: !!c.pinned }),
+    deleteChat: (id) => call('DELETE', `/chats/${enc(id)}`).catch((e) => { if (e.status !== 404) throw e }),
+    saveMessage: (chatId, m) => call('PUT', `/chats/${enc(chatId)}/messages/${enc(m.id)}`, toApiMessage(m)),
+    rateResponse: (id, body) => call('POST', `/responses/${enc(id)}/rating`, body),
+
+    listExpertise: () => call('GET', '/expertise'),
+    createExpertise: (e) => call('POST', '/expertise', e),
+    updateExpertise: (id, patch) => call('PATCH', `/expertise/${enc(id)}`, pick(patch, EDITABLE)),
+    deleteExpertise: (id) => call('DELETE', `/expertise/${enc(id)}`),
+    recordUsage: (ids) => call('POST', '/expertise/usage', { ids }),
+    // action: submit | approve | reject | deprecate | restore | rollback
+    expertiseAction: (id, action, body) => call('POST', `/expertise/${enc(id)}/${action}`, body),
+
+    listProposals: () => call('GET', '/proposals'),
+    createProposal: (p) => call('POST', '/proposals', p),
+    // action: approve (returns the updated Expertise) | reject
+    proposalAction: (id, action) => call('POST', `/proposals/${enc(id)}/${action}`),
+  }
+}

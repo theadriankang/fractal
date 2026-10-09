@@ -31,8 +31,10 @@ function Toast() {
 }
 
 function Shell() {
-  const { sidebarOpen, user } = useStore()
+  const { sidebarOpen, user, loadFromBackend } = useStore()
   const location = useLocation()
+  // Chats, the Library and the Review Queue load from Supabase for whoever is signed in.
+  useEffect(() => { if (user) loadFromBackend() }, [user?.id])
   // Signed out → sign-in page, then back to where the person was going.
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
 
