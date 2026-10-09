@@ -30,6 +30,7 @@ Restart uvicorn after editing `.env`; `--reload` only watches Python files.
 | GET    | `/api/health` | `{status, database, claude}` — DB connectivity + whether Claude is configured |
 | GET    | `/api/models` | Models this backend serves, with availability |
 | POST   | `/api/chat/stream` | Streams one model's answer as Server-Sent Events |
+| POST   | `/api/writing/generate` | Generate a summary or email draft from selected approved Expertise |
 | GET    | `/api/taxonomy` | Domain → topics taxonomy (mirrors `src/data/taxonomy.js`) |
 | GET    | `/api/expertise` | List all expertise |
 | GET    | `/api/expertise/{id}` | Single expertise with versions + feedback |
@@ -115,3 +116,21 @@ Demo users:
 - Expertise matching is still the front end's keyword match. Prompt 3 replaces it.
 - Attached files are not sent to Claude yet; web search is not implemented.
 - GPT, Gemini, Grok, Hunyuan and DeepSeek are still mocked.
+
+## Writing Assistant
+
+`POST /api/writing/generate` accepts `mode` (`summary` or `email`), `instructions`,
+`recipient`, `sender`, `tone` (`professional`, `friendly`, `concise`) and `expertise`
+(1–10 records in the chat Expertise shape, plus `summary`). Email requests require
+instructions. References must be approved and have unique IDs; combined context is
+limited to 100,000 characters.
+
+The response contains `summary`, `email` (null or `{subject, body}`), `citations`
+(`{expertiseId, version, excerpt}`) and `missingInformation`. The service uses the
+existing Claude Sonnet integration and verifies citation IDs, versions and quoted
+passages against the supplied references. Unverified output returns a retryable
+502 error. The browser supplies its current Expertise records as with chat;
+this endpoint does not store drafts or send email.
+
+Run offline tests with `.venv/bin/python -m unittest discover -s tests -v` from
+`backend/`. They mock Claude and require no API calls or database connection.

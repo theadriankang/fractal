@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Pencil, Save, Send, Check, Archive, Download, MessageSquarePlus, RotateCcw, GitCompare, FileText, MessagesSquare, Mic,
-  Link2, ThumbsUp, ThumbsDown, Trash2, ChevronDown, ChevronLeft, ChevronRight, Copy, ShieldCheck, Info, AlertTriangle,
+  Link2, ThumbsUp, ThumbsDown, Trash2, ChevronDown, ChevronLeft, ChevronRight, Copy, ShieldCheck, Info, AlertTriangle, Mail,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { CONTENT_FIELDS } from '../data/expertise'
@@ -394,6 +394,9 @@ export default function ExpertiseDetail() {
                   <button className="menu-item" onClick={() => download(`${slugify(e.name)}.md`, toMarkdown(e), 'text/markdown')}><Download size={15} /> Download .md (SKILL.md)</button>
                   <button className="menu-item" onClick={() => download(`${slugify(e.name)}.json`, JSON.stringify(e, null, 2), 'application/json')}><Download size={15} /> Download .json</button>
                 </Dropdown>
+                {e.status === 'approved' && (
+                  <Link to="/writing" state={{ expertiseId: e.id }} className="btn-outline"><Mail size={14} /> Summarize / draft email</Link>
+                )}
                 <button className="btn-outline" disabled={!mayEdit} title={editBlock || ''} onClick={() => setParams({ edit: '1' })}><Pencil size={14} /> Edit</button>
                 {e.status === 'draft' && (
                   <button

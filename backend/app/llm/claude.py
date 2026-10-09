@@ -23,12 +23,12 @@ def is_configured() -> bool:
     return bool(settings.anthropic_api_key)
 
 
-async def stream_reply(model_key: str, system: str, messages: list[dict]) -> AsyncIterator[tuple[str, dict]]:
+async def stream_reply(model_key: str, system: str, messages: list[dict], *, max_tokens: int = 64000) -> AsyncIterator[tuple[str, dict]]:
     """Yields ("delta", {"text"}) for each text chunk, then ("done", {...}) or ("error", {...})."""
     spec = MODELS[model_key]
     params: dict = {
         "model": spec["model"],
-        "max_tokens": 64000,
+        "max_tokens": max_tokens,
         "system": system,
         "messages": messages,
         "output_config": {"effort": settings.claude_effort},

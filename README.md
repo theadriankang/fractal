@@ -65,6 +65,19 @@ Organised as **Domain → Topic → Expertise** (taxonomy in `src/data/taxonomy.
 - Submitted Expertise awaiting approval, proposed revisions (with diff), and drafts.
 - **Roles** (switch in the user menu): *Contributor* can capture/edit/submit; *Reviewer* approves, rejects, deprecates, rolls back.
 
+### Writing Assistant
+- Open **Writing Assistant** in the sidebar, or **Summarize / draft email** on an approved Expertise page to preselect that reference.
+- Select up to 10 approved Expertise pages. Search by name or content and filter by domain.
+- **Summary** condenses the selected guidance; an optional instruction sets the focus.
+- **Email draft** takes an employee's goal, recipient/audience and tone, then produces an editable subject and message. Copy the draft into your email app.
+- Supporting references show the exact Expertise versions, owners and quoted passages. Missing details appear separately; dates and other unknowns use placeholders.
+- Live generation uses Claude Sonnet via `POST /api/writing/generate`; start the backend with `ANTHROPIC_API_KEY` configured. Restart the backend after adding this endpoint.
+- With `VITE_USE_MOCK=true`, a clearly labelled demo preview assembles source excerpts rather than claiming to generate tailored writing.
+- Results stay in the current page session. This feature drafts text; it does not send email or change Expertise.
+
+Check the frontend service with `npm run test:writing`. Run backend checks from
+`backend/` with `.venv/bin/python -m unittest discover -s tests -v`.
+
 ### Settings
 - Theme (light/dark/system), per-provider API keys + enable toggles, Auto routing table, Expertise behaviour (auto-apply, auto-detect; human approval always on).
 
