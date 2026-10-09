@@ -270,24 +270,35 @@ export const useStore = create(
         try {
           const remoteChats = await listChatsApi()
           set((s) => {
-            const localIds = new Set(remoteChats.map((c) => c.id))
-            const locals = s.chats.filter((c) => !localIds.has(c.id))
-            return {
-              chats: [...remoteChats.map((c) => ({
-                ...c,
-                ownerId: s.user?.id,
-                updatedAt: c.updatedAt || c.updated_at || now(),
-                messages: (c.messages || []).map((m) => ({
-                  ...m,
-                  responses: (m.responses || []).map((r) => ({
-                    ...r,
-                    modelId: r.modelId ?? r.model_id ?? '',
-                    expertise: r.expertiseUsed ?? r.expertise_used ?? [],
-                    streaming: false,
-                  })),
+            const localById = new Map(s.chats.map((c) => [c.id, c]))
+            const uid = s.user?.id
+            // Merge remote chats with local: keep local messages unless the
+            // remote chat actually has messages saved server-side.
+            const merged = remoteChats.map((rc) => {
+              const local = localById.get(rc.id)
+              const remoteMsgs = (rc.messages || []).map((m) => ({
+                ...m,
+                responses: (m.responses || []).map((r) => ({
+                  ...r,
+                  modelId: r.modelId ?? r.model_id ?? '',
+                  expertise: r.expertiseUsed ?? r.expertise_used ?? [],
+                  streaming: false,
                 })),
-              })), ...locals],
-            }
+              }))
+              const hasRemoteMsgs = remoteMsgs.length > 0
+              return {
+                ...rc,
+                ownerId: rc.ownerId ?? rc.owner_id ?? uid,
+                updatedAt: rc.updatedAt || rc.updated_at || now(),
+                messages: hasRemoteMsgs ? remoteMsgs : (local?.messages || []),
+              }
+            })
+            // Keep local-only chats (not on the server) that belong to the active user.
+            const remoteIds = new Set(remoteChats.map((c) => c.id))
+            const localOnly = s.chats.filter(
+              (c) => !remoteIds.has(c.id) && (chatOwner(c) === uid || c.ownerId === uid),
+            )
+            return { chats: [...merged, ...localOnly] }
           })
         } catch {
           // Chats stay local — no toast (already shown for expertise if offline)
@@ -929,12 +940,17 @@ export const useStore = create(
       // v3 adds portfolio fixtures once without overwriting existing work.
       migrate: (state, version) => migrateDemoState(state, version, withSnapshots(PORTFOLIO_EXPERTISE), PORTFOLIO_PROPOSALS),
       partialize: (s) => ({
-        // In mock mode, persist everything (demo data stays between reloads).
-        // When connected to the backend, persist only settings, selectedModels
-        // and session — expertise/proposals/chats come from the server.
+        // Chats are always persisted locally — the backend doesn't store
+        // individual messages yet, so we can't afford to lose them on reload.
+        chats: s.chats,
+        // In mock mode, persist expertise/proposals too (demo seed data).
+        // When connected to the backend, those come from the server.
         ...(USE_MOCK
-          ? { chats: s.chats, expertise: s.expertise, proposals: s.proposals, settings: s.settings, session: s.session, selectedModels: s.selectedModels }
-          : { settings: s.settings, session: s.session, selectedModels: s.selectedModels }),
+          ? { expertise: s.expertise, proposals: s.proposals }
+          : {}),
+        settings: s.settings,
+        session: s.session,
+        selectedModels: s.selectedModels,
       }),
       // Any stream interrupted by a reload is marked finished.
       onRehydrateStorage: () => (state) => {
@@ -944,9 +960,9 @@ export const useStore = create(
         state.session = { ...session, signedIn: session.signedIn.filter((id) => userById(id)) }
         state.user = userById(state.session.activeId)
         setActiveEmail(state.user?.email || null)
-        state.chats = state.chats.map((c) => ({
+        state.chats = (state.chats || []).map((c) => ({
           ...c,
-          messages: c.messages.map((m) => {
+          messages: (c.messages || []).map((m) => {
             if (!m.responses) return m
             const out = { ...m, responses: m.responses.map((r) => ({ ...r, streaming: false })) }
             // a capture check interrupted by a reload is simply dropped
