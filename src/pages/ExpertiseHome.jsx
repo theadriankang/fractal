@@ -1,6 +1,7 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { BookOpenCheck, TrendingUp, ShieldCheck, Users, ArrowRight, Plus, Sparkles, Clock, Flame } from 'lucide-react'
 import { useStore } from '../store'
+import { canContribute, contributeBlock } from '../lib/permissions'
 import { TAXONOMY, buildTree, slugify, domainBySlug } from '../data/taxonomy'
 import { StatusBadge, timeAgo } from '../components/ui'
 import { Breadcrumb } from './ExpertiseLayout'
@@ -95,7 +96,7 @@ export default function ExpertiseHome() {
 export function ExpertiseDomain() {
   const { slug } = useParams()
   const navigate = useNavigate()
-  const { expertise, createExpertise } = useStore()
+  const { expertise, createExpertise, user } = useStore()
   const meta = domainBySlug(slug)
   if (!meta) return <p className="p-16 text-center text-gray-500">Domain not found.</p>
   const d = buildTree(expertise).find((x) => x.domain === meta.domain)
@@ -124,7 +125,7 @@ export function ExpertiseDomain() {
         <section key={t.name} id={`topic-${slugify(t.name)}`} className="mt-10 scroll-mt-6">
           <div className="flex items-center justify-between border-b border-gray-100 pb-2 dark:border-gray-800">
             <h2 className="text-xl font-semibold">{t.name}</h2>
-            <button className="btn-ghost text-xs" onClick={() => add(t.name)}><Plus size={14} /> Add</button>
+            <button className="btn-ghost text-xs" disabled={!canContribute(user, d.domain)} title={contributeBlock(user, d.domain) || ''} onClick={() => add(t.name)}><Plus size={14} /> Add</button>
           </div>
           {t.items.length ? (
             <div className="mt-2 divide-y divide-gray-100 dark:divide-gray-850">

@@ -11,6 +11,29 @@ const BACKEND_MODELS = new Set(['claude-opus', 'claude-sonnet', 'claude-haiku'])
 /** True when this model's answers come from the backend rather than the mock. */
 export const isLive = (modelId) => !USE_MOCK && BACKEND_MODELS.has(modelId)
 
+/**
+ * Know-how capture: POST /api/expertise/extract (see src/lib/capture.js for the request/response).
+ * Resolves to a Detection; rejects when the backend is offline or errors, so callers can fall back.
+ */
+export async function extractKnowhow(body, { timeoutMs = 20000 } = {}) {
+  if (USE_MOCK) throw new Error('Mock mode')
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch('/api/expertise/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `Backend error (${res.status}).`)
+    return { ...data, source: 'ai' }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // The Expertise fields the backend's system prompt uses.
 const EXPERTISE_FIELDS = ['id', 'name', 'version', 'status', 'owner', 'whenToUse', 'knowledge', 'decisionLogic', 'guardrails', 'escalation']
 const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, e[f]]))

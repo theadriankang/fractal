@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Search, ChevronRight, LayoutGrid, ShieldCheck, Plus, X } from 'lucide-react'
 import { useStore, reviewCount } from '../store'
-import { buildTree, slugify, ASSET_TYPES } from '../data/taxonomy'
+import { contributeBlock } from '../lib/permissions'
+import { buildTree, slugify, ASSET_TYPES, domainMeta } from '../data/taxonomy'
 import { Toggle } from './ui'
 
 const STATUS_DOT = {
@@ -13,7 +14,9 @@ const STATUS_DOT = {
 }
 
 export default function ExpertiseNav() {
-  const { expertise, createExpertise } = useStore()
+  const { expertise, createExpertise, user } = useStore()
+  const homeDomain = user.domains?.[0]
+  const createBlock = contributeBlock(user, homeDomain)
   const pending = useStore(reviewCount)
   const { id } = useParams()
   const location = useLocation()
@@ -137,7 +140,12 @@ export default function ExpertiseNav() {
       </div>
 
       <div className="border-t border-gray-100 p-2 dark:border-gray-850">
-        <button className="btn-ghost w-full justify-start" onClick={() => navigate(`/expertise/${createExpertise()}?edit=1`)}>
+        <button
+          className="btn-ghost w-full justify-start"
+          disabled={!!createBlock}
+          title={createBlock || `New draft in ${homeDomain}`}
+          onClick={() => navigate(`/expertise/${createExpertise({ domain: homeDomain, topic: domainMeta(homeDomain).topics[0] })}?edit=1`)}
+        >
           <Plus size={15} /> New Expertise
         </button>
       </div>

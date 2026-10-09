@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, BookOpenCheck, FileText, Globe, Sparkles, X, GitPullRequestArrow, ArrowRight,
+  Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, BookOpenCheck, FileText, Globe, X,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { ModelBadge } from './ModelSelector'
+import CaptureCard from './CaptureCard'
+import { contributeBlock } from '../lib/permissions'
 
 export function UserMessage({ msg }) {
   const expertise = useStore((s) => s.expertise)
@@ -60,7 +62,9 @@ function ExpertiseUsed({ refs }) {
 
 function ResponseCard({ chatId, msg, idx, compare }) {
   const r = msg.responses[idx]
-  const { regenerate, rateResponse } = useStore()
+  const { regenerate, rateResponse, user, expertise } = useStore()
+  const usedDomain = expertise.find((e) => e.id === r.expertise?.[0]?.id)?.domain
+  const correctionBlock = usedDomain ? contributeBlock(user, usedDomain) : null
   const [copied, setCopied] = useState(false)
   const [correcting, setCorrecting] = useState(false)
   const [correction, setCorrection] = useState('')
@@ -117,9 +121,11 @@ function ResponseCard({ chatId, msg, idx, compare }) {
             <button className="icon-btn p-1" onClick={() => setCorrecting(false)}><X size={14} /></button>
           </div>
           <p className="mb-2 text-xs text-gray-500">
-            {r.expertise?.length
-              ? 'Your correction goes to the Review Queue as a proposed revision of the Expertise used. Nothing changes until a reviewer approves it.'
-              : 'Your feedback helps Fractal improve.'}
+            {!r.expertise?.length
+              ? 'Your feedback helps Fractal improve.'
+              : correctionBlock
+                ? `Your feedback is recorded on the Expertise used. ${correctionBlock}`
+                : 'Your correction goes to the Review Queue as a proposed revision of the Expertise used. Nothing changes until a reviewer approves it.'}
           </p>
           <textarea
             autoFocus
@@ -145,65 +151,6 @@ function ResponseCard({ chatId, msg, idx, compare }) {
   )
 }
 
-function DetectionCard({ chatId, msg }) {
-  const { acceptDetection, dismissDetection, user } = useStore()
-  const navigate = useNavigate()
-  const d = msg.detection
-  if (!d || msg.detectionState === 'dismissed') return null
-
-  if (msg.detectionState === 'saved')
-    return (
-      <div className="mt-4 flex items-center gap-2 rounded-2xl bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600 ring-1 ring-emerald-500/25 animate-fadeIn dark:text-emerald-400">
-        <Check size={16} />
-        {d.kind === 'new' ? 'Saved as a draft Expertise.' : `Revision proposed for ${d.expertiseName}.`}
-        <button
-          className="ml-auto flex items-center gap-1 font-medium hover:underline"
-          onClick={() => navigate(d.kind === 'new' ? `/expertise/${msg.detectionResult}` : '/expertise/review')}
-        >
-          {d.kind === 'new' ? 'Open draft' : 'View in Review Queue'} <ArrowRight size={14} />
-        </button>
-      </div>
-    )
-
-  return (
-    <div className="relative mt-4 overflow-hidden rounded-2xl bg-gradient-to-br from-accent-500/10 via-transparent to-indigo-500/10 p-4 ring-1 ring-accent-500/30 animate-fadeIn">
-      <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-500/15 text-accent-500">
-          {d.kind === 'new' ? <Sparkles size={18} /> : <GitPullRequestArrow size={18} />}
-        </span>
-        <div className="flex-1">
-          <p className="font-medium">
-            {d.kind === 'new' ? 'Fractal noticed reusable know-how' : `This could improve "${d.expertiseName}"`}
-          </p>
-          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-            {d.kind === 'new'
-              ? <>Save it as a draft Expertise in <b className="text-gray-700 dark:text-gray-200">{d.draft.domain} › {d.draft.topic}</b> so the next person gets the same answer. A reviewer approves it before it goes live.</>
-              : 'You shared something the current version doesn\'t cover. Propose it as a revision for review?'}
-          </p>
-          <div className="mt-2 rounded-xl bg-white/60 p-3 text-sm ring-1 ring-gray-200 dark:bg-gray-900/60 dark:ring-gray-800">
-            {d.kind === 'new' ? (
-              <>
-                <p className="font-medium">{d.draft.name}</p>
-                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-gray-600 dark:text-gray-400">
-                  {d.draft.knowledge.slice(0, 3).map((k, i) => <li key={i}>{k}</li>)}
-                </ul>
-              </>
-            ) : (
-              <p className="text-gray-600 dark:text-gray-400"><span className="text-emerald-500">+ </span>{d.addition}</p>
-            )}
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button className="btn-accent" onClick={() => acceptDetection(chatId, msg.id)}>
-              {d.kind === 'new' ? 'Save as draft' : 'Propose revision'}
-            </button>
-            <button className="btn-ghost" onClick={() => dismissDetection(chatId, msg.id)}>Not now</button>
-          </div>
-          <p className="mt-2 text-[11px] text-gray-500">Captured by {user.name} · source conversation will be linked</p>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 export function AssistantMessage({ chatId, msg }) {
   const compare = msg.responses.length > 1
@@ -212,7 +159,7 @@ export function AssistantMessage({ chatId, msg }) {
       <div className={compare ? `grid gap-3 ${msg.responses.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'}` : ''}>
         {msg.responses.map((_, i) => <ResponseCard key={i} chatId={chatId} msg={msg} idx={i} compare={compare} />)}
       </div>
-      <DetectionCard chatId={chatId} msg={msg} />
+      <CaptureCard key={msg.detection ? 'detected' : 'none'} chatId={chatId} msg={msg} />
     </div>
   )
 }
