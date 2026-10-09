@@ -211,6 +211,20 @@ Read docs/PROJECT_CONTEXT.md.
 
 ---
 
+## Prompt 12 · Meetings → backend + "Extract Expertise from this meeting"
+
+```
+Read docs/PROJECT_CONTEXT.md, src/lib/meetingsService.js, src/hooks/useMeetingRecorder.js and src/pages/MeetingRecorder.jsx.
+
+1. Move meetings into the FastAPI backend: table Meeting(id, user_id, title, transcript_text, duration, created_at, updated_at) and endpoints GET/POST /api/meetings, PATCH/DELETE /api/meetings/{id} (owner-only, role-checked like everything else). Rewrite src/lib/meetingsService.js to call these endpoints with the SAME function names and return shapes (createMeeting, updateMeeting, listMeetings, deleteMeeting) so the UI does not change. Keep the localStorage fallback when VITE_USE_MOCK=true. Then remove @supabase/supabase-js, src/lib/supabase.js and supabase/ (and the "Saved to Supabase" label → "Saved").
+2. Add POST /api/meetings/{id}/extract: run the Appendix B extraction prompt over the transcript (chunk into ~3,000-word windows, merge duplicates) and return up to 5 candidate Expertise drafts, each with source {type:'interview', title: meeting title, excerpt, date}.
+3. In MeetingRecorder.jsx, when status is 'done' show a button "Extract Expertise from this meeting" above the chat. Show the candidates as cards (name, domain › topic, 2-3 knowledge bullets) each with "Save as draft" / "Dismiss". Saved drafts go to the Review Queue with origin 'auto-detected' and the meeting as the source.
+4. Swap the browser speech API for server-side transcription later: leave a TODO and a config flag TRANSCRIBE=browser|tencent-asr|whisper; implement only 'browser' now.
+```
+✅ **Done when:** recording an expert explaining a procedure produces at least one draft Expertise in the Review Queue whose Sources section shows the meeting as an *interview*.
+
+---
+
 ## Appendix A — Grounded system prompt (use verbatim in Prompt 3)
 
 ```

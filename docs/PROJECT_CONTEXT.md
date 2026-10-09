@@ -26,6 +26,11 @@ Version-controlled (rollback) · Secure (role-based access) · Clearly bounded (
   src/data/taxonomy.js   TAXONOMY (6 domains → topics), ASSET_TYPES, buildTree()
   src/data/chats.js      Seed chats + suggestion prompts
   src/pages/*, src/components/*  UI
+  src/pages/MeetingRecorder.jsx + src/hooks/useMeetingRecorder.js, useSpeechRecognition.js, useMicAnalyser.js
+                      Meeting Recorder (live transcript via browser Web Speech API, inline editing, recent meetings)
+  src/lib/meetingsService.js, src/lib/supabase.js
+                      Meetings persistence: Supabase if VITE_SUPABASE_* set, else localStorage (temporary — see Prompt 12)
+  supabase/migrations/  SQL for the meetings table (Supabase, temporary)
 /backend              Python FastAPI service (TO BUILD)
 /docs                 This file + build prompts
 ```
@@ -55,3 +60,5 @@ Assistant msg: `{id, role:'assistant', createdAt, responses:[{modelId, auto:{cat
 6. Role checks happen **on the server**: only `reviewer` can approve, reject, roll back, deprecate.
 7. Keep a **mock fallback**: front end must still run with `VITE_USE_MOCK=true` (demo safety if APIs fail on stage).
 8. Small commits with clear messages after each prompt.
+9. **Do not touch the Meeting Recorder or Supabase files** until Prompt 12. The main backend is FastAPI + SQLite; meetings move into it in Prompt 12.
+10. Work on a branch per prompt (e.g. `backend/prompt-1`), open a pull request, merge into `main` when the ✅ check passes.
