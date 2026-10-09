@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
     String, Text, Boolean, Integer, BigInteger, Float, DateTime,
-    ForeignKey, JSON,
+    ForeignKey, JSON, ARRAY,
 )
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -24,7 +24,9 @@ class Profile(Base):
     __tablename__ = "profiles"
     id: Mapped[str] = mapped_column(PgUUID(as_uuid=False), primary_key=True)
     name: Mapped[str] = mapped_column(Text, default="")
+    email: Mapped[str | None] = mapped_column(Text, nullable=True)
     role: Mapped[str] = mapped_column(String, default="contributor")
+    domains: Mapped[list] = mapped_column(ARRAY(Text), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -142,6 +144,7 @@ class Feedback(Base):
     user_name: Mapped[str] = mapped_column(Text, default="")
     rating: Mapped[str] = mapped_column(String, nullable=False)
     comment: Mapped[str] = mapped_column(Text, default="")
+    chat_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -149,7 +152,7 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    actor: Mapped[str | None] = mapped_column(String, nullable=True)
+    actor: Mapped[str | None] = mapped_column(PgUUID(as_uuid=False), nullable=True)
     actor_role: Mapped[str | None] = mapped_column(String, nullable=True)
     action: Mapped[str] = mapped_column(Text, default="")
     target_type: Mapped[str | None] = mapped_column(Text, nullable=True)

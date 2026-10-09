@@ -6,6 +6,21 @@
 
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
+// The active signed-in account's email (set by the store via setActiveEmail).
+let _activeEmail = null
+
+/** Set the active user's email so it's sent on every backend request. */
+export function setActiveEmail(email) {
+  _activeEmail = email || null
+}
+
+/** Build headers with the X-User-Email of the active signed-in account. */
+function _authHeaders(extra = {}) {
+  const h = { ...extra }
+  if (_activeEmail) h['X-User-Email'] = _activeEmail
+  return h
+}
+
 // Filled from GET /api/models on first load. Unavailable models keep the
 // existing mock fallback so the front end always works, even with no keys.
 let _liveModels = new Set()
@@ -60,7 +75,7 @@ export async function extractKnowhow(body, { timeoutMs = 20000 } = {}) {
   try {
     const res = await fetch('/api/expertise/extract', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
       signal: ctrl.signal,
     })
@@ -125,7 +140,7 @@ export function streamChat({ model, messages, expertise = [], routing }, { onMet
     try {
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: _authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ model, messages, expertise: expertise.map(pickExpertise), routing }),
         signal: ctrl.signal,
       })
