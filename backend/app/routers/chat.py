@@ -64,7 +64,13 @@ async def chat_stream(req: ChatStreamRequest):
 
     # Only approved Expertise may reach a model prompt (PROJECT_CONTEXT rule 4).
     applied = [e for e in req.expertise if e.status == "approved"]
-    system = build_system_prompt(applied)
+    system = build_system_prompt(
+        applied,
+        model_display_name=entry.display_name,
+        provider_name=entry.provider_name,
+        provider_model=entry.model,
+        routing=req.routing,
+    )
 
     async def events():
         yield sse("meta", {

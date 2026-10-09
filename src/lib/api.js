@@ -110,7 +110,7 @@ const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, 
  * handlers: onMeta({expertise}), onDelta(text), onDone({stopReason, model}), onError(message).
  * Returns an abort function; aborting fires no handler.
  */
-export function streamChat({ model, messages, expertise = [] }, { onMeta, onDelta, onDone, onError }) {
+export function streamChat({ model, messages, expertise = [], routing }, { onMeta, onDelta, onDone, onError }) {
   const ctrl = new AbortController()
 
   ;(async () => {
@@ -126,7 +126,7 @@ export function streamChat({ model, messages, expertise = [] }, { onMeta, onDelt
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages, expertise: expertise.map(pickExpertise) }),
+        body: JSON.stringify({ model, messages, expertise: expertise.map(pickExpertise), routing }),
         signal: ctrl.signal,
       })
       if (!res.ok) {

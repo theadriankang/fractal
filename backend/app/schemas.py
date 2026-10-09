@@ -217,6 +217,14 @@ class ChatTurn(BaseModel):
     files: list[str] = Field(default=[], max_length=5)  # ids from POST /api/files (user turns)
 
 
+class RoutingIn(BaseModel):
+    """How this response was routed to the model (sent by the front end)."""
+
+    selectedBy: Literal["user", "auto"] = "user"
+    category: str = ""
+    reason: str = ""
+
+
 class ExpertiseIn(BaseModel):
     """The Expertise fields the system prompt needs (shape: src/data/expertise.js)."""
 
@@ -236,3 +244,4 @@ class ChatStreamRequest(BaseModel):
     model: str  # front-end model id, e.g. "claude-sonnet"
     messages: list[ChatTurn] = Field(min_length=1, max_length=40)
     expertise: list[ExpertiseIn] = Field(default=[], max_length=10)
+    routing: RoutingIn | None = None
