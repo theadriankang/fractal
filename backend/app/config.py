@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     extraction_threshold: float = 0.6  # below this confidence, nothing is proposed
     extraction_min_words: int = 12  # skip short messages (questions, small talk)
 
+    # Feedback loop (docs/FEEDBACK_LOOP.md): 👎 corrections -> proposals, before/after tests
+    loop_correction_model: str = "claude-haiku-5-5"
+    loop_grader_model: str = "claude-sonnet-5-5"
+    loop_answer_model: str = "claude-haiku"  # front-end id; a test run uses the chat's model when given
+    loop_threshold: float = 0.6  # below this confidence a correction proposes nothing
+    loop_max_cases: int = 8
+    loop_concurrency: int = 4
+
     # CORS
     cors_origins: list[str] = ["http://localhost:5173"]
 

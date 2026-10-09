@@ -42,6 +42,8 @@ Restart uvicorn after editing `.env`; `--reload` only watches Python files.
 | PATCH  | `/api/chats/{id}` | Update chat title / folder / pinned |
 | DELETE | `/api/chats/{id}` | Delete a chat |
 | POST   | `/api/expertise/extract` | Know-how capture: did the user share reusable know-how in this exchange? (contributors only) |
+| POST   | `/api/loop/correction` | Feedback loop: a 👎 correction → a precise change to one Expertise (contributors only) |
+| POST   | `/api/loop/test` | Feedback loop: re-ask saved questions with the current and proposed Expertise, graded blind |
 
 ### `POST /api/chat/stream`
 
@@ -79,6 +81,24 @@ exists it must come from the verified profile instead.
 .venv/bin/python -m pytest -q tests                # offline: validation + access rules (Claude stubbed)
 .venv/bin/python -m scripts.eval_capture           # live: 20 realistic messages, prints a score (needs ANTHROPIC_API_KEY)
 ```
+
+## Feedback loop (`/api/loop/*`)
+
+See `docs/FEEDBACK_LOOP.md`. Both endpoints are stateless (the browser sends the Expertise and keeps
+the results) and follow the capture pattern: one Claude tool call, then plain-Python validation.
+
+- **`POST /api/loop/correction`** — `LOOP_CORRECTION_MODEL` (default `claude-haiku-5-5`) diagnoses the
+  correction (`expertise_wrong | expertise_incomplete | scope_wrong | model_ignored | not_actionable`) and
+  proposes the minimal change. `app/loop/correct.py` keeps only removals that match a real line of the
+  Expertise (exact or ≥ 0.85 similar), drops adds it already has, converts step positions, accepts
+  `mergeWith` only for an open proposal on the same Expertise, and always returns a test question.
+- **`POST /api/loop/test`** — each case is answered with the current and the proposed Expertise
+  (`LOOP_ANSWER_MODEL`, default `claude-haiku`), then each answer is graded on its own by
+  `LOOP_GRADER_MODEL` (default `claude-sonnet-5-5`), which sees only the question, the criteria and the
+  answer. Pass/fail is decided in Python (`replay.decide`). At most `LOOP_MAX_CASES` (8) cases,
+  `LOOP_CONCURRENCY` (4) calls at a time; a failing case is reported as `error`, not a failed run.
+
+Tests: `tests/test_loop.py` (Claude stubbed).
 
 ## Auth (stub)
 

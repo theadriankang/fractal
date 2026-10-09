@@ -34,6 +34,38 @@ export async function extractKnowhow(body, { timeoutMs = 20000 } = {}) {
   }
 }
 
+async function postJSON(path, body, timeoutMs) {
+  if (USE_MOCK) throw new Error('Mock mode')
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `Backend error (${res.status}).`)
+    return data
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Feedback loop (src/lib/feedbackLoop.js): a 👎 correction → a precise change to one Expertise.
+ * Rejects when the backend is offline or errors, so callers can fall back to offline rules.
+ */
+export async function proposeFix(body, { timeoutMs = 30000 } = {}) {
+  return { ...(await postJSON('/api/loop/correction', body, timeoutMs)), engine: 'ai' }
+}
+
+/** Feedback loop: re-ask saved questions with the current and the proposed Expertise, graded blind. */
+export async function runChangeTest(body, { timeoutMs = 180000 } = {}) {
+  return { ...(await postJSON('/api/loop/test', body, timeoutMs)), engine: 'ai' }
+}
+
 // The Expertise fields the backend's system prompt uses.
 const EXPERTISE_FIELDS = ['id', 'name', 'version', 'status', 'owner', 'whenToUse', 'knowledge', 'decisionLogic', 'guardrails', 'escalation']
 const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, e[f]]))

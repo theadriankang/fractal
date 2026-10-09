@@ -6,7 +6,11 @@ import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfo
 import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
-import { isLive, streamChat, extractKnowhow } from './lib/api'
+import { isLive, streamChat, extractKnowhow, proposeFix, runChangeTest } from './lib/api'
+import {
+  addTestCase, applyChanges, atVersion, buildCorrectionRequest, casesForRun, mergeChanges, offlineCorrection,
+  offlineTestRun, positiveCase, proposedVersion,
+} from './lib/feedbackLoop'
 import { DEMO_USERS, DEFAULT_USER, normalizeUser } from './data/users'
 import { canContribute, contributeBlock, isContributor } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
@@ -249,48 +253,129 @@ export const useStore = create(
         streams.set(msgId, [...(streams.get(msgId) || []), cancel])
       },
 
-      // Rating feeds the Expertise feedback loop.
-      rateResponse: (chatId, msgId, idx, rating, comment = '') => {
+      // Rating feeds the Expertise feedback loop (docs/FEEDBACK_LOOP.md). Every rating records the
+      // version it judged; a 👍 on the current version saves the exchange as a test question; a 👎
+      // with a correction becomes a precise revision proposal (submitCorrection).
+      rateResponse: (chatId, msgId, idx, rating, comment = '', targetId = null) => {
         const chat = get().chats.find((c) => c.id === chatId)
-        const r = chat.messages.find((m) => m.id === msgId).responses[idx]
+        const i = chat.messages.findIndex((m) => m.id === msgId)
+        const r = chat.messages[i].responses[idx]
         get().patchMessage(chatId, msgId, (m) => ({
           ...m,
           responses: m.responses.map((x, k) => (k === idx ? { ...x, rating } : x)),
         }))
         if (!r.expertise.length) return
         const user = get().user.name
+        const question = chat.messages[i - 1]?.content || ''
         set((s) => ({
-          expertise: s.expertise.map((e) =>
-            r.expertise.some((x) => x.id === e.id)
-              ? { ...e, feedback: [{ user, rating, comment, date: now(), chatId }, ...e.feedback] }
-              : e,
-          ),
+          expertise: s.expertise.map((e) => {
+            const ref = r.expertise.find((x) => x.id === e.id)
+            if (!ref) return e
+            const next = { ...e, feedback: [{ user, rating, comment, date: now(), chatId, version: ref.version }, ...e.feedback] }
+            if (rating === 'up' && ref.version === e.version && question && r.content && !r.error)
+              next.testCases = addTestCase(e.testCases, positiveCase(question, r.content))
+            return next
+          }),
         }))
-        if (rating === 'down' && comment.trim()) {
-          const target = r.expertise[0].id
-          const te = get().expertise.find((e) => e.id === target)
-          const block = te && contributeBlock(get().user, te.domain)
-          if (block) {
-            get().showToast(`Feedback saved. ${block}`)
-            return
-          }
-          set((s) => ({
-            proposals: [
-              {
-                id: uid('prop'),
-                expertiseId: target,
-                type: 'revision',
-                createdAt: now(),
-                author: `${user} (via 👎 feedback)`,
-                reason: comment,
-                changes: { knowledge: { add: [comment], remove: [] } },
-                chatId,
-              },
-              ...s.proposals,
-            ],
-          }))
-          get().showToast('Correction sent to the Review Queue')
+        if (rating === 'down' && comment.trim()) get().submitCorrection(chatId, msgId, idx, comment, targetId)
+      },
+
+      // 👎 + correction → Claude diagnoses it and proposes the minimal change (replace a step, add a
+      // guardrail, narrow "when to use"…) plus a test question. Offline, keyword rules stand in.
+      submitCorrection: async (chatId, msgId, idx, correction, targetId = null) => {
+        const user = get().user
+        const chat = get().chats.find((c) => c.id === chatId)
+        const r = chat.messages.find((m) => m.id === msgId).responses[idx]
+        const ref = r.expertise.find((x) => x.id === targetId) || r.expertise[0]
+        const te = get().expertise.find((e) => e.id === ref?.id)
+        if (!te) return null
+        const block = contributeBlock(user, te.domain)
+        if (block) { get().showToast(`Feedback saved. ${block}`); return null }
+
+        const req = buildCorrectionRequest({ user, chat, msgId, idx, correction, targetId: te.id, expertise: get().expertise, proposals: get().proposals })
+        get().showToast('Analysing your correction…')
+        let result
+        try {
+          result = await proposeFix(req)
+        } catch {
+          result = offlineCorrection(req)
         }
+
+        if (result.diagnosis === 'model_ignored') {
+          get().showToast('Feedback saved. The Expertise already covers this — the answer didn\'t follow it, so no change is needed.')
+          return result
+        }
+        if (result.diagnosis === 'not_actionable' || !result.expertiseId) {
+          get().showToast('Feedback saved. It didn\'t point to a specific change — try naming the step or rule that\'s wrong.')
+          return result
+        }
+        if (result.allowed === false) { get().showToast(`Feedback saved. ${result.blockedReason}`); return result }
+
+        const report = { user: user.name, comment: correction.trim(), date: now(), chatId }
+        const twin = result.mergeWith && get().proposals.find((p) => p.id === result.mergeWith)
+        if (twin) {
+          const n = (twin.reportCount || 1) + 1
+          set((s) => ({
+            proposals: s.proposals.map((p) => (p.id === twin.id
+              ? { ...p, changes: mergeChanges(p.changes, result.changes), set: { ...(p.set || {}), ...(result.set || {}) },
+                  reportCount: n, reports: [...(p.reports || []), report], testRun: undefined }
+              : p)),
+          }))
+          get().showToast(`Same issue as an open proposal — now ${n} reports`)
+          return result
+        }
+        set((s) => ({
+          proposals: [
+            {
+              id: uid('prop'),
+              expertiseId: result.expertiseId,
+              type: 'revision',
+              origin: 'feedback',
+              createdAt: now(),
+              author: `${user.name} (via 👎 feedback)`,
+              reason: result.reason || correction,
+              changes: result.changes,
+              set: result.set || {},
+              diagnosis: result.diagnosis,
+              confidence: result.confidence,
+              engine: result.engine,
+              baseVersion: ref.version,
+              reportCount: 1,
+              reports: [report],
+              testCase: result.testCase ? { ...result.testCase, source: 'correction' } : null,
+              chatId,
+            },
+            ...s.proposals,
+          ],
+        }))
+        get().showToast(result.engine === 'offline' ? 'Correction sent to the Review Queue (offline rules)' : 'Correction sent to the Review Queue')
+        return result
+      },
+
+      // Before/after test for a proposal: saved questions answered with the current and the
+      // proposed version, each answer graded blind. Offline, the run is simulated and labelled so.
+      runProposalTest: async (pid) => {
+        const p = get().proposals.find((x) => x.id === pid)
+        const e = p && get().expertise.find((x) => x.id === p.expertiseId)
+        if (!e) return
+        const cases = casesForRun(e, p)
+        if (!cases.length) {
+          get().showToast('No test questions yet — 👍 good answers or submit corrections to build them up')
+          return
+        }
+        const patch = (testRun) => set((s) => ({ proposals: s.proposals.map((x) => (x.id === pid ? { ...x, testRun } : x)) }))
+        patch({ status: 'running', at: now(), total: cases.length })
+        let out
+        try {
+          out = await runChangeTest({
+            current: atVersion(e),
+            proposed: proposedVersion(e, p),
+            cases: cases.map(({ id, question, mustDo = [], mustNotDo = [], referenceAnswer = null }) => ({ id, question, mustDo, mustNotDo, referenceAnswer })),
+          })
+        } catch (err) {
+          out = { ...offlineTestRun(cases), offlineReason: err.message }
+        }
+        patch({ status: 'done', at: now(), baseVersion: e.version, ...out })
       },
 
       // ---------------- detection → expertise ----------------
@@ -474,15 +559,15 @@ export const useStore = create(
       approveProposal: (pid) => {
         const p = get().proposals.find((x) => x.id === pid)
         const e = get().expertise.find((x) => x.id === p.expertiseId)
-        const patch = {}
-        for (const [field, { add = [], remove = [] }] of Object.entries(p.changes)) {
-          patch[field] = [...e[field].filter((x) => !remove.includes(x)), ...add]
-        }
+        // Replacements stay in place and new steps keep their position (src/lib/feedbackLoop.js).
+        const patch = applyChanges(e, p.changes, p.set)
         const merged = { ...e, ...patch }
         const version = bumpVersion(e.version)
         get().updateExpertise(e.id, {
           ...patch,
           version,
+          // the question that exposed the mistake now guards every future change
+          ...(p.testCase?.question ? { testCases: addTestCase(e.testCases, { ...p.testCase, source: 'correction' }) } : {}),
           // provenance (e.g. the meeting a revision came from) follows the change into the Expertise
           ...(p.sources?.length ? { sources: [...p.sources, ...e.sources] } : {}),
           versions: [...e.versions, { version, date: now(), author: p.author, approvedBy: get().user.name, note: p.reason, snapshot: snapshot(merged) }],
