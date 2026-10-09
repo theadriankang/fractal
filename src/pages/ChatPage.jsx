@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { useNavigate, useParams, Link, useLocation } from 'react-router-dom'
-import { BookOpenCheck, ArrowRight } from 'lucide-react'
-import { useStore } from '../store'
+import { BookOpenCheck, ArrowRight, Eye } from 'lucide-react'
+import { useStore, chatOwner } from '../store'
+import { userById } from '../data/users'
+import { canOpenQueue } from '../lib/permissions'
 import { SUGGESTIONS } from '../data/chats'
 import ModelSelector from '../components/ModelSelector'
 import Composer from '../components/Composer'
@@ -47,8 +49,12 @@ function Welcome({ onSend }) {
 export default function ChatPage() {
   const { chatId } = useParams()
   const navigate = useNavigate()
-  const { chats, newChat, sendMessage, stopGeneration } = useStore()
-  const chat = chats.find((c) => c.id === chatId)
+  const { chats, newChat, sendMessage, stopGeneration, user } = useStore()
+  const found = chats.find((c) => c.id === chatId)
+  // Someone else's chat opens read-only, and only for people who review (e.g. a Review Queue source link).
+  const mine = !found || chatOwner(found) === user.id
+  const chat = mine || canOpenQueue(user) ? found : undefined
+  const owner = found && !mine ? userById(chatOwner(found)) : null
   const bottom = useRef(null)
   const scroller = useRef(null)
 
@@ -91,12 +97,18 @@ export default function ChatPage() {
               <div ref={bottom} />
             </div>
           </div>
+          {!mine ? (
+            <p className="flex items-center justify-center gap-1.5 px-4 pb-4 text-xs text-gray-500">
+              <Eye size={13} /> Viewing {owner?.name || 'another person'}’s conversation as the source of a review. It’s read-only.
+            </p>
+          ) : (
           <div className="px-4 pb-3">
             <Composer onSend={onSend} streaming={streaming} onStop={() => stopGeneration(chat.id)} />
             <p className="mt-2 text-center text-[11px] text-gray-500">
               Fractal can make mistakes. Recommendations should be verified by a qualified person.
             </p>
           </div>
+          )}
         </>
       )}
     </div>

@@ -7,8 +7,8 @@ import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
 import { isLive, streamChat, extractKnowhow } from './lib/api'
-import { DEMO_USERS, DEFAULT_USER, normalizeUser } from './data/users'
-import { canContribute, contributeBlock, isContributor } from './lib/permissions'
+import { DEMO_USERS, authenticate, userById } from './data/users'
+import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
 import { readiness } from './lib/readiness'
 
@@ -136,7 +136,10 @@ export const useStore = create(
         streamSpeed: 1,
         connections: defaultConnections,
       },
-      user: DEFAULT_USER, // see src/data/users.js — role + expert domains drive src/lib/permissions.js
+      // Signed-in account (src/data/users.js); null on the sign-in page. Role + domains drive src/lib/permissions.js.
+      user: null,
+      // Like Claude: several accounts can be signed in on this device; one is active.
+      session: { activeId: null, signedIn: [] },
       selectedModels: ['auto'],
 
       // ---------------- ui (not persisted) ----------------
@@ -162,20 +165,35 @@ export const useStore = create(
             connections: { ...s.settings.connections, [pid]: { ...s.settings.connections[pid], ...patch } },
           },
         })),
-      switchUser: (id) => {
-        const u = DEMO_USERS.find((x) => x.id === id)
-        if (!u) return
-        set({ user: u })
-        get().showToast(`Signed in as ${u.name} — ${u.role === 'reviewer' ? 'Reviewer' : `Contributor · ${u.domains.join(', ')}`}`)
+      // ---------------- accounts (simulated auth) ----------------
+      login: (email, password) => {
+        const u = authenticate(email, password)
+        if (!u) return { error: 'Incorrect email or password.' }
+        set((s) => ({ user: u, session: { activeId: u.id, signedIn: [...new Set([...(s.session?.signedIn || []), u.id])] } }))
+        return { user: u }
       },
-      // Older callers: switch to the first demo user with that role.
-      setRole: (role) => get().switchUser((DEMO_USERS.find((u) => u.role === role) || DEFAULT_USER).id),
+      switchAccount: (id) => {
+        const u = userById(id)
+        if (!u || !get().session.signedIn.includes(id)) return
+        set((s) => ({ user: u, session: { ...s.session, activeId: id } }))
+        get().showToast(`Switched to ${u.name}`)
+      },
+      // Signs out the active account; falls back to another signed-in account, else the sign-in page.
+      logout: () => {
+        const { session } = get()
+        const signedIn = session.signedIn.filter((id) => id !== session.activeId)
+        const next = userById(signedIn[0])
+        set({ user: next, session: { activeId: next?.id || null, signedIn } })
+        return next
+      },
+      logoutAll: () => set({ user: null, session: { activeId: null, signedIn: [] } }),
+
       setSelectedModels: (ids) => set({ selectedModels: ids.length ? ids : ['auto'] }),
 
       // ---------------- chats ----------------
       newChat: () => {
         const id = uid('chat')
-        set((s) => ({ chats: [{ id, title: 'New Chat', folder: null, updatedAt: now(), messages: [] }, ...s.chats] }))
+        set((s) => ({ chats: [{ id, ownerId: get().user?.id, title: 'New Chat', folder: null, updatedAt: now(), messages: [] }, ...s.chats] }))
         return id
       },
       renameChat: (id, title) => set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, title } : c)) })),
@@ -282,6 +300,7 @@ export const useStore = create(
                 type: 'revision',
                 createdAt: now(),
                 author: `${user} (via 👎 feedback)`,
+                authorId: get().user.id,
                 reason: comment,
                 changes: { knowledge: { add: [comment], remove: [] } },
                 chatId,
@@ -376,7 +395,7 @@ export const useStore = create(
           const id = uid('prop')
           set((s) => ({
             proposals: [
-              { id, expertiseId: target.id, type: 'revision', createdAt: now(), author: `${user.name} (captured from chat)`,
+              { id, expertiseId: target.id, type: 'revision', createdAt: now(), author: `${user.name} (captured from chat)`, authorId: user.id,
                 reason: det.reason || 'New know-how shared during a conversation.', changes, chatId, capture, sources: [source] },
               ...s.proposals,
             ],
@@ -401,6 +420,7 @@ export const useStore = create(
           version: '0.1',
           owner: get().user.name,
           ownerRole: get().user.title || '',
+          authorId: get().user.id,
           reviewer: null,
           keywords: [],
           usageCount: 0,
@@ -426,7 +446,15 @@ export const useStore = create(
       updateExpertise: (id, patch) =>
         set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? { ...e, ...patch, updatedAt: now() } : e)) })),
 
-      deleteExpertise: (id) => set((s) => ({ expertise: s.expertise.filter((e) => e.id !== id) })),
+      deleteExpertise: (id) => {
+        const e = get().expertise.find((x) => x.id === id)
+        if (!canGovern(get().user) && !(e?.status === 'draft' && canEdit(get().user, e))) {
+          get().showToast('Only the Reviewer, or a domain expert for a draft, can delete Expertise.')
+          return false
+        }
+        set((s) => ({ expertise: s.expertise.filter((x) => x.id !== id) }))
+        return true
+      },
 
       submitForReview: (id) => {
         const e = get().expertise.find((x) => x.id === id)
@@ -440,6 +468,8 @@ export const useStore = create(
 
       approveExpertise: (id, note = 'Approved') => {
         const e = get().expertise.find((x) => x.id === id)
+        const block = reviewBlock(get().user, e?.domain, e)
+        if (block) { get().showToast(block); return }
         const version = bumpVersion(e.version)
         get().updateExpertise(id, {
           status: 'approved',
@@ -451,16 +481,27 @@ export const useStore = create(
       },
 
       rejectExpertise: (id) => {
+        const e = get().expertise.find((x) => x.id === id)
+        const block = reviewBlock(get().user, e?.domain, e)
+        if (block) { get().showToast(block); return }
         get().updateExpertise(id, { status: 'draft' })
         get().showToast('Sent back to draft')
       },
 
       deprecateExpertise: (id) => {
+        if (!canGovern(get().user)) { get().showToast('Only the Reviewer can deprecate Expertise.'); return }
         get().updateExpertise(id, { status: 'deprecated' })
         get().showToast('Expertise deprecated')
       },
 
+      restoreExpertise: (id) => {
+        if (!canGovern(get().user)) { get().showToast('Only the Reviewer can restore Expertise.'); return }
+        get().updateExpertise(id, { status: 'approved' })
+        get().showToast('Expertise restored')
+      },
+
       rollbackExpertise: (id, toVersion) => {
+        if (!canGovern(get().user)) { get().showToast('Only the Reviewer can roll back Expertise.'); return }
         const e = get().expertise.find((x) => x.id === id)
         const target = e.versions.find((v) => v.version === toVersion)
         if (!target?.snapshot) return
@@ -479,6 +520,8 @@ export const useStore = create(
       approveProposal: (pid) => {
         const p = get().proposals.find((x) => x.id === pid)
         const e = get().expertise.find((x) => x.id === p.expertiseId)
+        const block = reviewBlock(get().user, e?.domain, p)
+        if (block) { get().showToast(block); return }
         const patch = {}
         for (const [field, { add = [], remove = [] }] of Object.entries(p.changes)) {
           patch[field] = [...e[field].filter((x) => !remove.includes(x)), ...add]
@@ -502,7 +545,7 @@ export const useStore = create(
         if (block) { get().showToast(block); return }
         set((s) => ({
           proposals: [
-            { id: uid('prop'), expertiseId, type: 'revision', createdAt: now(), author: get().user.name, reason, changes },
+            { id: uid('prop'), expertiseId, type: 'revision', createdAt: now(), author: get().user.name, authorId: get().user.id, reason, changes },
             ...s.proposals,
           ],
         }))
@@ -547,6 +590,7 @@ export const useStore = create(
             type: 'revision',
             createdAt: now(),
             author: `${user} (captured from meeting)`,
+            authorId: get().user.id,
             reason: `Know-how from meeting "${title}" — routed by the category selector.`,
             changes,
             meetingId,
@@ -574,6 +618,10 @@ export const useStore = create(
       },
 
       rejectProposal: (pid) => {
+        const p = get().proposals.find((x) => x.id === pid)
+        const e = get().expertise.find((x) => x.id === p?.expertiseId)
+        const block = reviewBlock(get().user, e?.domain, p)
+        if (block) { get().showToast(block); return }
         set((s) => ({ proposals: s.proposals.filter((x) => x.id !== pid) }))
         get().showToast('Proposal rejected')
       },
@@ -593,13 +641,16 @@ export const useStore = create(
         expertise: s.expertise,
         proposals: s.proposals,
         settings: s.settings,
-        user: s.user,
+        session: s.session,
         selectedModels: s.selectedModels,
       }),
       // Any stream interrupted by a reload is marked finished.
       onRehydrateStorage: () => (state) => {
         if (!state) return
-        state.user = normalizeUser(state.user)
+        // The active account comes from the session only; no session → sign-in page.
+        const session = state.session?.signedIn ? state.session : { activeId: null, signedIn: [] }
+        state.session = { ...session, signedIn: session.signedIn.filter((id) => userById(id)) }
+        state.user = userById(state.session.activeId)
         state.chats = state.chats.map((c) => ({
           ...c,
           messages: c.messages.map((m) => {
@@ -614,5 +665,22 @@ export const useStore = create(
   ),
 )
 
-export const reviewCount = (s) =>
-  s.expertise.filter((e) => e.status === 'in_review' || (e.status === 'draft' && e.origin === 'auto-detected')).length + s.proposals.length
+// Chats belong to the account that started them; older/seed chats belong to the Reviewer demo account.
+export const chatOwner = (c) => c.ownerId || 'u-adrian'
+
+// Queue items the signed-in account can see: everything for the Reviewer, own domains for experts.
+export const queueFor = (s) => {
+  const u = s.user
+  const domainOf = (id) => s.expertise.find((e) => e.id === id)?.domain
+  return {
+    inReview: s.expertise.filter((e) => e.status === 'in_review' && seesQueue(u, e.domain)),
+    drafts: s.expertise.filter((e) => e.status === 'draft' && seesQueue(u, e.domain)),
+    proposals: s.proposals.filter((p) => seesQueue(u, domainOf(p.expertiseId))),
+  }
+}
+
+export const reviewCount = (s) => {
+  if (!s.user) return 0
+  const q = queueFor(s)
+  return q.inReview.length + q.drafts.filter((e) => e.origin === 'auto-detected').length + q.proposals.length
+}

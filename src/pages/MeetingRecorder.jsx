@@ -428,7 +428,7 @@ function TakeawaysCard({ rec, readOnly }) {
             <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-400"><AlertTriangle size={13} /> Category selector unavailable ({ins.category_error}). You can still link takeaways manually.</p>
           )}
           {!readOnly && !isContributor(user) && (
-            <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-500"><Lock size={12} /> You're signed in as a Reviewer. Reviewers approve know-how but don't contribute it — sign in as a domain expert to send these links to the Review Queue.</p>
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-500"><Lock size={12} /> {contributeBlock(user)} Sign in as a domain expert to send these links to the Review Queue.</p>
           )}
           {!readOnly && <p className="mt-3 text-[11px] text-gray-500">{routed} link{routed === 1 ? '' : 's'} will be sent to the Review Queue when you approve. Only links into your own expert domains ({(user.domains || []).join(', ') || 'none'}) can be sent. Live Expertise only changes after a Reviewer merges them.</p>}
         </>

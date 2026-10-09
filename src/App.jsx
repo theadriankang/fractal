@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
 import SettingsModal from './components/SettingsModal'
@@ -10,6 +10,15 @@ import ExpertiseDetail from './pages/ExpertiseDetail'
 import ReviewQueue from './pages/ReviewQueue'
 import MeetingRecorder from './pages/MeetingRecorder'
 import Landing from './pages/Landing'
+import Login from './pages/Login'
+
+function LoginRoute() {
+  const user = useStore((s) => s.user)
+  const location = useLocation()
+  const adding = new URLSearchParams(location.search).get('add') === '1'
+  if (user && !adding) return <Navigate to="/" replace />
+  return <Login />
+}
 
 function Toast() {
   const toast = useStore((s) => s.toast)
@@ -22,7 +31,10 @@ function Toast() {
 }
 
 function Shell() {
-  const { sidebarOpen } = useStore()
+  const { sidebarOpen, user } = useStore()
+  const location = useLocation()
+  // Signed out → sign-in page, then back to where the person was going.
+  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -66,6 +78,7 @@ export default function App() {
     <>
       <Routes>
         <Route path="/welcome" element={<Landing />} />
+        <Route path="/login" element={<LoginRoute />} />
         <Route path="/*" element={<Shell />} />
       </Routes>
       <Toast />

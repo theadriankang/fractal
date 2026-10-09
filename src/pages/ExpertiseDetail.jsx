@@ -9,7 +9,7 @@ import { CONTENT_FIELDS } from '../data/expertise'
 import { TAXONOMY, ASSET_TYPES, domainMeta, slugify, flatOrder } from '../data/taxonomy'
 import { StatusBadge, fmtDate, timeAgo, Dropdown } from '../components/ui'
 import { Breadcrumb } from './ExpertiseLayout'
-import { canEdit, contributeBlock } from '../lib/permissions'
+import { canEdit, contributeBlock, canGovern, reviewBlock } from '../lib/permissions'
 import { readiness } from '../lib/readiness'
 
 const LIST_SECTIONS = [
@@ -183,7 +183,7 @@ function Versions({ e }) {
               {!current && v.snapshot && (
                 <span className="flex gap-1">
                   <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(open === i ? null : i)}><GitCompare size={13} /> Compare</button>
-                  <button className="btn-ghost px-2 py-1 text-xs" disabled={user.role !== 'reviewer'} onClick={() => rollbackExpertise(e.id, v.version)} title={user.role !== 'reviewer' ? 'Reviewer only' : ''}>
+                  <button className="btn-ghost px-2 py-1 text-xs" disabled={!canGovern(user)} onClick={() => rollbackExpertise(e.id, v.version)} title={!canGovern(user) ? 'Only the Reviewer can roll back' : ''}>
                     <RotateCcw size={13} /> Roll back
                   </button>
                 </span>
@@ -305,7 +305,7 @@ export default function ExpertiseDetail() {
   const { id } = useParams()
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
-  const { expertise, user, updateExpertise, submitForReview, approveExpertise, deprecateExpertise, deleteExpertise, proposeRevision, showToast } = useStore()
+  const { expertise, user, updateExpertise, submitForReview, approveExpertise, deprecateExpertise, restoreExpertise, deleteExpertise, proposeRevision, showToast } = useStore()
   const e = expertise.find((x) => x.id === id)
   const edit = params.get('edit') === '1'
   const [draft, setDraft] = useState(null)
@@ -328,7 +328,9 @@ export default function ExpertiseDetail() {
 
   if (!e) return <p className="p-16 text-center text-gray-500">Expertise not found. <Link className="text-accent-500" to="/expertise">Back to overview</Link></p>
 
-  const isReviewer = user.role === 'reviewer'
+  const governs = canGovern(user)
+  const decideBlock = reviewBlock(user, e.domain, e)
+  const mayDelete = governs || (e.status === 'draft' && canEdit(user, e))
   // Content can only be changed by contributors who are experts in this Expertise's domain.
   const mayEdit = canEdit(user, e)
   const editBlock = contributeBlock(user, e.domain)
@@ -406,15 +408,15 @@ export default function ExpertiseDetail() {
                   </button>
                 )}
                 {e.status === 'in_review' && (
-                  <button className="btn-accent" disabled={!isReviewer} onClick={() => approveExpertise(e.id, 'Initial approval')} title={!isReviewer ? 'Reviewer only' : ''}><Check size={14} /> Approve</button>
+                  <button className="btn-accent" disabled={!!decideBlock} onClick={() => approveExpertise(e.id, 'Initial approval')} title={decideBlock || ''}><Check size={14} /> Approve</button>
                 )}
                 {e.status === 'approved' && (
                   <button className="btn-primary" onClick={() => navigate('/', { state: { attach: e.id } })}><MessageSquarePlus size={14} /> Use in chat</button>
                 )}
                 <Dropdown align="right" trigger={() => <button className="btn-ghost px-2">•••</button>}>
-                  {e.status === 'approved' && <button className="menu-item" disabled={!isReviewer} onClick={() => deprecateExpertise(e.id)}><Archive size={15} /> Deprecate</button>}
-                  {e.status === 'deprecated' && <button className="menu-item" disabled={!isReviewer} onClick={() => updateExpertise(e.id, { status: 'approved' })}><RotateCcw size={15} /> Restore</button>}
-                  <button className="menu-item text-red-500" onClick={() => { deleteExpertise(e.id); navigate('/expertise') }}><Trash2 size={15} /> Delete</button>
+                  {e.status === 'approved' && <button className="menu-item disabled:opacity-40" disabled={!governs} title={governs ? '' : 'Only the Reviewer can deprecate'} onClick={() => deprecateExpertise(e.id)}><Archive size={15} /> Deprecate</button>}
+                  {e.status === 'deprecated' && <button className="menu-item disabled:opacity-40" disabled={!governs} title={governs ? '' : 'Only the Reviewer can restore'} onClick={() => restoreExpertise(e.id)}><RotateCcw size={15} /> Restore</button>}
+                  <button className="menu-item text-red-500 disabled:opacity-40" disabled={!mayDelete} title={mayDelete ? '' : 'Only the Reviewer, or a domain expert for a draft, can delete'} onClick={() => { if (deleteExpertise(e.id)) navigate('/expertise') }}><Trash2 size={15} /> Delete</button>
                 </Dropdown>
               </>
             )}

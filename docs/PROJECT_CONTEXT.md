@@ -71,12 +71,20 @@ meeting is stored (with `expertise_links` for audit) and `captureMeetingInsights
 proposal per touched Expertise, or an auto-detected draft for new ones. Live Expertise (and its SKILL.md export)
 changes only when a Reviewer merges them.
 
-## Who may contribute (domain-scoped)
-Users: `{id, name, title, role:'contributor'|'reviewer', domains:[taxonomy domains]}` (demo list: `src/data/users.js`;
-DB: `profiles.role` + `profiles.domains`). Rule (`src/lib/permissions.js`): **only a contributor who is an expert in an
-Expertise's domain may contribute to it** — capture from chat or meetings, propose revisions (incl. 👎 corrections),
-create/edit drafts, submit for review. Reviewers approve / reject / roll back / deprecate but never author, so nobody
-approves their own contribution. Enforced in the UI, again inside store actions, and in `/api/expertise/extract`.
+## Accounts & permissions (domain-scoped)
+Sign-in is simulated in the browser (`/login`, `src/pages/Login.jsx`; accounts in `src/data/users.js`, password
+`demo1234`) until Supabase Auth replaces it. Like Claude, several accounts can be signed in on one device and switched
+from the sidebar account menu (`session: {activeId, signedIn[]}` in the store). Chats belong to the account that
+started them (`chat.ownerId`); others' chats open read-only, only for reviewers/experts via a Review Queue source link.
+User: `{id, name, email, title, role:'reviewer'|'contributor'|'intern', domains:[taxonomy domains]}`
+(DB: `profiles.role` + `profiles.domains`, migration `20261010140000_profiles_expert_domains.sql`). Rules live in
+`src/lib/permissions.js` and are re-checked inside store actions:
+- **Reviewer** (Adrian Kang): sees every domain's queue, approves/rejects anything, and is the only one who can roll
+  back, deprecate or restore. Never authors content.
+- **Domain expert** (`contributor`): contributes (capture from chat/meetings, revisions incl. 👎 corrections, create/
+  edit/submit drafts) AND reviews queue items, only in their own domains, and never their own contribution
+  (`authorId` / owner check: four eyes).
+- **Intern**: uses approved Expertise in chat and reads it; may rate answers; cannot contribute or open the Review Queue.
 
 ## Know-how capture from chat (AI Harvest)
 After an answer finishes (contributors only, user message ≥ 12 words) the store calls `POST /api/expertise/extract`
@@ -84,7 +92,7 @@ After an answer finishes (contributors only, user message ≥ 12 words) the stor
 `{kind:'new'|'revision', confidence, reason, source:'ai'|'keyword', target:{domain, topic, expertiseId?, expertiseName?},
 draft?:{name, domain, topic, assetTypes, summary, whenToUse, keywords}, items:[{field, text, quote}], allowed, blockedReason}`
 with `detectionState: 'checking'|'pending'|'saved'|'dismissed'`. Offline/mock answers fall back to the keyword detector.
-Saving creates an auto-detected draft (with `capture` metadata + the quoted source) or a revision proposal. Drafts must
+Only the person who said it can save it. Saving creates an auto-detected draft (with `capture` metadata + the quoted source) or a revision proposal. Drafts must
 pass `src/lib/readiness.js` (summary, when to use, knowledge, ≥1 guardrail, ≥1 escalation) before "Submit for review".
 
 ## Chat message shape (see src/store.js sendMessage)

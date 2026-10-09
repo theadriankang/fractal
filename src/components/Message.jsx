@@ -64,7 +64,8 @@ function ResponseCard({ chatId, msg, idx, compare }) {
   const r = msg.responses[idx]
   const { regenerate, rateResponse, user, expertise } = useStore()
   const usedDomain = expertise.find((e) => e.id === r.expertise?.[0]?.id)?.domain
-  const correctionBlock = usedDomain ? contributeBlock(user, usedDomain) : null
+  // Corrections become proposals, so they follow the contribution rule; anyone can still rate.
+  const correctionBlock = usedDomain ? contributeBlock(user, usedDomain) : (user.role !== 'contributor' ? contributeBlock(user) : null)
   const [copied, setCopied] = useState(false)
   const [correcting, setCorrecting] = useState(false)
   const [correction, setCorrection] = useState('')
@@ -127,23 +128,23 @@ function ResponseCard({ chatId, msg, idx, compare }) {
                 ? `Your feedback is recorded on the Expertise used. ${correctionBlock}`
                 : 'Your correction goes to the Review Queue as a proposed revision of the Expertise used. Nothing changes until a reviewer approves it.'}
           </p>
-          <textarea
+          {!correctionBlock && <textarea
             autoFocus
             rows={2}
             className="input resize-none"
             placeholder="e.g. You should also check the CHW pump VSD before staging up a chiller."
             value={correction}
             onChange={(e) => setCorrection(e.target.value)}
-          />
+          />}
           <div className="mt-2 flex justify-end gap-2">
-            <button className="btn-ghost" onClick={() => { rateResponse(chatId, msg.id, idx, 'down'); setCorrecting(false) }}>Just 👎</button>
-            <button
+            <button className={correctionBlock ? 'btn-primary' : 'btn-ghost'} onClick={() => { rateResponse(chatId, msg.id, idx, 'down'); setCorrecting(false) }}>{correctionBlock ? 'Rate 👎' : 'Just 👎'}</button>
+            {!correctionBlock && <button
               className="btn-primary"
               disabled={!correction.trim()}
               onClick={() => { rateResponse(chatId, msg.id, idx, 'down', correction); setCorrecting(false); setCorrection('') }}
             >
               Submit correction
-            </button>
+            </button>}
           </div>
         </div>
       )}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Search, ChevronRight, LayoutGrid, ShieldCheck, Plus, X } from 'lucide-react'
 import { useStore, reviewCount } from '../store'
-import { contributeBlock } from '../lib/permissions'
+import { contributeBlock, canOpenQueue } from '../lib/permissions'
 import { buildTree, slugify, ASSET_TYPES, domainMeta } from '../data/taxonomy'
 import { Toggle } from './ui'
 
@@ -79,10 +79,12 @@ export default function ExpertiseNav() {
       <div className="flex-1 overflow-y-auto px-2 pb-4">
         <div className="space-y-0.5 border-b border-gray-100 pb-2 dark:border-gray-850">
           <NavLink end to="/expertise" className={linkCls}><LayoutGrid size={15} /> Overview</NavLink>
-          <NavLink to="/expertise/review" className={linkCls}>
-            <ShieldCheck size={15} /> <span className="flex-1">Review Queue</span>
-            {pending > 0 && <span className="rounded-full bg-amber-500/15 px-1.5 text-[11px] font-semibold text-amber-500">{pending}</span>}
-          </NavLink>
+          {canOpenQueue(user) && (
+            <NavLink to="/expertise/review" className={linkCls}>
+              <ShieldCheck size={15} /> <span className="flex-1">Review Queue</span>
+              {pending > 0 && <span className="rounded-full bg-amber-500/15 px-1.5 text-[11px] font-semibold text-amber-500">{pending}</span>}
+            </NavLink>
+          )}
         </div>
 
         {tree.map((d) => {
