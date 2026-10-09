@@ -5,6 +5,7 @@ import {
   Settings, RotateCcw, ShieldCheck, UserRound, Folder, ChevronDown, ChevronRight, Mic,
 } from 'lucide-react'
 import { useStore, reviewCount } from '../store'
+import { DEMO_USERS } from '../data/users'
 import { Logo, Dropdown } from './ui'
 
 function groupChats(chats) {
@@ -84,7 +85,7 @@ function Section({ title, icon, children, collapsible = false }) {
 
 export default function Sidebar() {
   const navigate = useNavigate()
-  const { chats, toggleSidebar, newChat, openSettings, user, setRole, resetDemo } = useStore()
+  const { chats, toggleSidebar, newChat, openSettings, user, switchUser, resetDemo } = useStore()
   const pending = useStore(reviewCount)
   const [q, setQ] = useState('')
 
@@ -167,20 +168,27 @@ export default function Sidebar() {
               </span>
               <span className="flex-1 text-left">
                 <span className="block text-sm font-medium">{user.name}</span>
-                <span className="block text-xs capitalize text-gray-500">{user.role}</span>
+                <span className="block truncate text-xs text-gray-500">
+                  {user.role === 'reviewer' ? 'Reviewer' : `Contributor · ${(user.domains || []).join(', ')}`}
+                </span>
               </span>
             </button>
           )}
         >
           <button className="menu-item" onClick={() => openSettings()}><Settings size={15} /> Settings</button>
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
-          <p className="px-2.5 pb-1 pt-1.5 text-xs text-gray-500">Role (demo)</p>
-          <button className="menu-item" onClick={() => setRole('contributor')}>
-            <UserRound size={15} /> Contributor {user.role === 'contributor' && '✓'}
-          </button>
-          <button className="menu-item" onClick={() => setRole('reviewer')}>
-            <ShieldCheck size={15} /> Reviewer {user.role === 'reviewer' && '✓'}
-          </button>
+          <p className="px-2.5 pb-1 pt-1.5 text-xs text-gray-500">Sign in as (demo)</p>
+          {DEMO_USERS.map((u) => (
+            <button key={u.id} className="menu-item items-start" onClick={() => switchUser(u.id)}>
+              {u.role === 'reviewer' ? <ShieldCheck size={15} className="mt-0.5 shrink-0" /> : <UserRound size={15} className="mt-0.5 shrink-0" />}
+              <span className="min-w-0 flex-1 text-left">
+                <span className="block">{u.name} {user.id === u.id && '✓'}</span>
+                <span className="block truncate text-[11px] text-gray-500">
+                  {u.role === 'reviewer' ? 'Reviewer · approves all domains' : `Contributor · ${u.domains.join(', ')}`}
+                </span>
+              </span>
+            </button>
+          ))}
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
           <button className="menu-item" onClick={() => { resetDemo(); navigate('/') }}><RotateCcw size={15} /> Reset demo data</button>
         </Dropdown>

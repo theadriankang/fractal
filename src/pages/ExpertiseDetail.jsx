@@ -9,6 +9,8 @@ import { CONTENT_FIELDS } from '../data/expertise'
 import { TAXONOMY, ASSET_TYPES, domainMeta, slugify, flatOrder } from '../data/taxonomy'
 import { StatusBadge, fmtDate, timeAgo, Dropdown } from '../components/ui'
 import { Breadcrumb } from './ExpertiseLayout'
+import { canEdit, contributeBlock } from '../lib/permissions'
+import { readiness } from '../lib/readiness'
 
 const LIST_SECTIONS = [
   { key: 'knowledge', id: 'knowledge', title: 'Knowledge & heuristics', hint: 'What an expert knows that a newcomer doesn\'t. One per line.' },
@@ -119,6 +121,29 @@ function ListView({ items, ordered, tone }) {
         </li>
       ))}
     </ol>
+  )
+}
+
+// Draft → review gate: what the owner still has to fill in before "Submit for review" unlocks.
+function ReadinessChecklist({ e }) {
+  const { checks, missing } = readiness(e)
+  const done = checks.filter((c) => c.required && c.done).length
+  const total = checks.filter((c) => c.required).length
+  return (
+    <div className={`mt-6 rounded-2xl px-4 py-3.5 ring-1 ${missing.length ? 'bg-amber-500/5 ring-amber-500/25' : 'bg-emerald-500/5 ring-emerald-500/25'}`}>
+      <p className="flex items-center justify-between text-sm font-semibold">
+        {missing.length ? 'Before this can be submitted for review' : 'Ready to submit for review'}
+        <span className="font-mono text-xs font-normal text-gray-500">{done}/{total} required</span>
+      </p>
+      <ul className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
+        {checks.map((c) => (
+          <li key={c.key} className={`flex items-start gap-1.5 ${c.done ? 'text-gray-500' : c.required ? '' : 'text-gray-500'}`}>
+            {c.done ? <Check size={14} className="mt-0.5 shrink-0 text-emerald-500" /> : <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ring-1 ${c.required ? 'ring-amber-500' : 'ring-gray-400'}`} />}
+            <span>{c.label}{!c.required && <span className="text-xs text-gray-500"> (recommended)</span>}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -304,7 +329,11 @@ export default function ExpertiseDetail() {
   if (!e) return <p className="p-16 text-center text-gray-500">Expertise not found. <Link className="text-accent-500" to="/expertise">Back to overview</Link></p>
 
   const isReviewer = user.role === 'reviewer'
-  const editing = edit && !!draft
+  // Content can only be changed by contributors who are experts in this Expertise's domain.
+  const mayEdit = canEdit(user, e)
+  const editBlock = contributeBlock(user, e.domain)
+  const ready = readiness(e)
+  const editing = edit && !!draft && mayEdit
   const view = editing ? draft : e
   const meta = domainMeta(view.domain)
   const idx = order.findIndex((x) => x.id === e.id)
@@ -365,8 +394,17 @@ export default function ExpertiseDetail() {
                   <button className="menu-item" onClick={() => download(`${slugify(e.name)}.md`, toMarkdown(e), 'text/markdown')}><Download size={15} /> Download .md (SKILL.md)</button>
                   <button className="menu-item" onClick={() => download(`${slugify(e.name)}.json`, JSON.stringify(e, null, 2), 'application/json')}><Download size={15} /> Download .json</button>
                 </Dropdown>
-                <button className="btn-outline" onClick={() => setParams({ edit: '1' })}><Pencil size={14} /> Edit</button>
-                {e.status === 'draft' && <button className="btn-primary" onClick={() => submitForReview(e.id)}><Send size={14} /> Submit for review</button>}
+                <button className="btn-outline" disabled={!mayEdit} title={editBlock || ''} onClick={() => setParams({ edit: '1' })}><Pencil size={14} /> Edit</button>
+                {e.status === 'draft' && (
+                  <button
+                    className="btn-primary"
+                    disabled={!mayEdit || !ready.ready}
+                    title={editBlock || (!ready.ready ? `Still needs: ${ready.missing.map((m) => m.label.toLowerCase()).join('; ')}` : '')}
+                    onClick={() => submitForReview(e.id)}
+                  >
+                    <Send size={14} /> Submit for review
+                  </button>
+                )}
                 {e.status === 'in_review' && (
                   <button className="btn-accent" disabled={!isReviewer} onClick={() => approveExpertise(e.id, 'Initial approval')} title={!isReviewer ? 'Reviewer only' : ''}><Check size={14} /> Approve</button>
                 )}
@@ -395,7 +433,7 @@ export default function ExpertiseDetail() {
           <div className="mt-5 grid gap-3 rounded-2xl p-4 ring-1 ring-gray-200 sm:grid-cols-2 dark:ring-gray-800">
             <label className="text-sm"><span className="label mb-1 block">Domain</span>
               <select className="input" value={draft.domain} onChange={(ev) => set({ domain: ev.target.value, topic: domainMeta(ev.target.value).topics[0] })}>
-                {TAXONOMY.map((t) => <option key={t.domain}>{t.domain}</option>)}
+                {TAXONOMY.filter((t) => user.domains?.includes(t.domain) || t.domain === e.domain).map((t) => <option key={t.domain}>{t.domain}</option>)}
               </select>
             </label>
             <label className="text-sm"><span className="label mb-1 block">Topic</span>
@@ -434,6 +472,21 @@ export default function ExpertiseDetail() {
             <span className="flex gap-1">{(e.assetTypes || []).map((a) => <span key={a} className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-400">{a}</span>)}</span>
           </div>
         )}
+
+        {!editing && editBlock && e.status !== 'deprecated' && (
+          <p className="mt-3 flex items-center gap-1.5 text-xs text-gray-500"><ShieldCheck size={13} /> {editBlock}</p>
+        )}
+
+        {e.capture && (
+          <Callout icon={MessagesSquare} tone="indigo" title="Captured from a conversation">
+            By {e.capture.capturedBy || e.owner}
+            {e.capture.confidence != null && <> · extractor confidence {Math.round(e.capture.confidence * 100)}%</>}
+            {e.capture.detector === 'keyword' && <> · keyword match (offline)</>}
+            {e.capture.reason && <span className="block text-xs opacity-80">Why: {e.capture.reason}</span>}
+          </Callout>
+        )}
+
+        {e.status === 'draft' && <ReadinessChecklist e={view} />}
 
         {editing && e.status === 'approved' && (
           <Callout icon={ShieldCheck} tone="indigo">This Expertise is live. Changes to its content will go to the Review Queue as a proposed revision.</Callout>

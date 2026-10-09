@@ -6,7 +6,11 @@ import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfo
 import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
-import { isLive, streamChat } from './lib/api'
+import { isLive, streamChat, extractKnowhow } from './lib/api'
+import { DEMO_USERS, DEFAULT_USER, normalizeUser } from './data/users'
+import { canContribute, contributeBlock, isContributor } from './lib/permissions'
+import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
+import { readiness } from './lib/readiness'
 
 const uid = (p = 'id') => `${p}-${Math.random().toString(36).slice(2, 9)}`
 const now = () => new Date().toISOString()
@@ -132,7 +136,7 @@ export const useStore = create(
         streamSpeed: 1,
         connections: defaultConnections,
       },
-      user: { name: 'Adrian Kang', role: 'reviewer' }, // 'contributor' | 'reviewer'
+      user: DEFAULT_USER, // see src/data/users.js — role + expert domains drive src/lib/permissions.js
       selectedModels: ['auto'],
 
       // ---------------- ui (not persisted) ----------------
@@ -158,7 +162,14 @@ export const useStore = create(
             connections: { ...s.settings.connections, [pid]: { ...s.settings.connections[pid], ...patch } },
           },
         })),
-      setRole: (role) => set((s) => ({ user: { ...s.user, role } })),
+      switchUser: (id) => {
+        const u = DEMO_USERS.find((x) => x.id === id)
+        if (!u) return
+        set({ user: u })
+        get().showToast(`Signed in as ${u.name} — ${u.role === 'reviewer' ? 'Reviewer' : `Contributor · ${u.domains.join(', ')}`}`)
+      },
+      // Older callers: switch to the first demo user with that role.
+      setRole: (role) => get().switchUser((DEMO_USERS.find((u) => u.role === role) || DEFAULT_USER).id),
       setSelectedModels: (ids) => set({ selectedModels: ids.length ? ids : ['auto'] }),
 
       // ---------------- chats ----------------
@@ -213,11 +224,7 @@ export const useStore = create(
           remaining -= 1
           if (remaining > 0) return
           streams.delete(asstMsg.id)
-          if (get().settings.autoDetect) {
-            const chat = get().chats.find((c) => c.id === chatId)
-            const det = detectExpertise(text, chat, matched)
-            if (det) get().patchMessage(chatId, asstMsg.id, (m) => ({ ...m, detection: det, detectionState: 'pending' }))
-          }
+          if (get().settings.autoDetect) get().runCapture(chatId, asstMsg.id, text, matched)
         }
         const cancels = responses.map((_, idx) => streamResponse(get, chatId, asstMsg.id, idx, { prompt: text, matched, onFinish }))
         streams.set(asstMsg.id, cancels)
@@ -261,6 +268,12 @@ export const useStore = create(
         }))
         if (rating === 'down' && comment.trim()) {
           const target = r.expertise[0].id
+          const te = get().expertise.find((e) => e.id === target)
+          const block = te && contributeBlock(get().user, te.domain)
+          if (block) {
+            get().showToast(`Feedback saved. ${block}`)
+            return
+          }
           set((s) => ({
             proposals: [
               {
@@ -283,38 +296,90 @@ export const useStore = create(
       // ---------------- detection → expertise ----------------
       dismissDetection: (chatId, msgId) => get().patchMessage(chatId, msgId, (m) => ({ ...m, detectionState: 'dismissed' })),
 
-      acceptDetection: (chatId, msgId) => {
+      // After an answer finishes: ask the extractor whether the user shared reusable know-how.
+      // Contributors only (reviewers approve, they don't author). Live (backend) answers use the
+      // Claude extractor; mock answers or an offline backend fall back to the keyword detector.
+      runCapture: async (chatId, msgId, text, matched = []) => {
+        const user = get().user
+        if (!isContributor(user)) return
         const chat = get().chats.find((c) => c.id === chatId)
-        const msg = chat.messages.find((m) => m.id === msgId)
+        const msg = chat?.messages.find((m) => m.id === msgId)
+        if (!msg) return
+        const keyword = () => fromKeywordDetector(detectExpertise(text, chat, matched), user, get().expertise)
+        const live = msg.responses.some((r) => isLive(r.modelId) && r.content && !r.error)
+        let det = null
+        if (!live) det = keyword()
+        else if (text.trim().split(/\s+/).length >= CAPTURE_MIN_WORDS) {
+          get().patchMessage(chatId, msgId, (m) => ({ ...m, detectionState: 'checking' }))
+          try {
+            const req = buildExtractRequest({ user, chat: get().chats.find((c) => c.id === chatId), asstMsgId: msgId, used: matched, expertise: get().expertise })
+            det = await extractKnowhow(req)
+            if (det.kind === 'none') det = null
+          } catch {
+            det = keyword()
+          }
+        }
+        get().patchMessage(chatId, msgId, (m) =>
+          det ? { ...m, detection: { ...det, capturedBy: user.id }, detectionState: 'pending' } : { ...m, detection: null, detectionState: null })
+      },
+
+      // Saves a detection the user confirmed (optionally edited in the card):
+      //   edits = { items: [{field, text, quote, include}], extras: [{field, text}], draft: {name, domain, topic} }
+      // 'new' → auto-detected draft Expertise; 'revision' → proposal in the Review Queue.
+      // Only a contributor who is an expert in the target domain may do this.
+      acceptDetection: (chatId, msgId, edits = {}) => {
+        const user = get().user
+        const chat = get().chats.find((c) => c.id === chatId)
+        const i = chat.messages.findIndex((m) => m.id === msgId)
+        const msg = chat.messages[i]
         const det = msg.detection
-        const userMsg = chat.messages[chat.messages.indexOf(msg) - 1]
-        let resultId
+        const draftMeta = { ...(det.draft || {}), ...(edits.draft || {}) }
+        const target = det.kind === 'revision' ? get().expertise.find((e) => e.id === det.target.expertiseId) : null
+        const domain = det.kind === 'new' ? draftMeta.domain : target?.domain
+        const block = contributeBlock(user, domain)
+        if (block) { get().showToast(block); return null }
+
+        const items = (edits.items || det.items).filter((x) => x.include !== false && x.text.trim())
+        const all = [...items, ...(edits.extras || []).filter((x) => x.text.trim()).map((x) => ({ ...x, quote: null }))]
+        if (!all.length) { get().showToast('Tick at least one line to save'); return null }
+        const pick = (f) => all.filter((x) => x.field === f).map((x) => x.text.trim())
+        const quotes = items.map((x) => x.quote).filter(Boolean)
+        const capture = { confidence: det.confidence, reason: det.reason, detector: det.source || 'keyword', capturedBy: user.name }
+        const source = {
+          type: 'conversation', chatId, title: chat.title, date: now(), capturedBy: user.name,
+          excerpt: (quotes.length ? quotes.map((q) => `"${q}"`).join(' … ') : chat.messages[i - 1]?.content || '').slice(0, 280),
+        }
+
+        let result
         if (det.kind === 'new') {
-          resultId = get().createExpertise({
-            ...det.draft,
-            origin: 'auto-detected',
-            sources: [{ type: 'conversation', chatId, title: chat.title, excerpt: userMsg.content.slice(0, 160), date: now() }],
+          const id = get().createExpertise({
+            name: draftMeta.name, domain: draftMeta.domain, topic: draftMeta.topic,
+            assetTypes: draftMeta.assetTypes?.length ? draftMeta.assetTypes : ['Office'],
+            summary: draftMeta.summary || '', whenToUse: draftMeta.whenToUse || '', keywords: draftMeta.keywords || [],
+            knowledge: pick('knowledge'), decisionLogic: pick('decisionLogic'), guardrails: pick('guardrails'), escalation: pick('escalation'),
+            origin: 'auto-detected', capture, sources: [source],
           })
+          result = { kind: 'new', id, missing: readiness(get().expertise.find((e) => e.id === id)).missing.map((m) => m.label) }
         } else {
-          resultId = uid('prop')
+          const changes = {}
+          for (const x of all) {
+            if ((target[x.field] || []).includes(x.text.trim())) continue
+            changes[x.field] ??= { add: [], remove: [] }
+            changes[x.field].add.push(x.text.trim())
+          }
+          if (!Object.keys(changes).length) { get().showToast(`${target.name} already contains these lines`); return null }
+          const id = uid('prop')
           set((s) => ({
             proposals: [
-              {
-                id: resultId,
-                expertiseId: det.expertiseId,
-                type: 'revision',
-                createdAt: now(),
-                author: `${get().user.name} (captured from chat)`,
-                reason: 'New know-how shared during a conversation.',
-                changes: { knowledge: { add: [det.addition], remove: [] } },
-                chatId,
-              },
+              { id, expertiseId: target.id, type: 'revision', createdAt: now(), author: `${user.name} (captured from chat)`,
+                reason: det.reason || 'New know-how shared during a conversation.', changes, chatId, capture, sources: [source] },
               ...s.proposals,
             ],
           }))
+          result = { kind: 'revision', id, missing: [] }
         }
-        get().patchMessage(chatId, msgId, (m) => ({ ...m, detectionState: 'saved', detectionResult: resultId }))
-        return resultId
+        get().patchMessage(chatId, msgId, (m) => ({ ...m, detectionState: 'saved', detectionResult: result.id, detectionMissing: result.missing }))
+        return result
       },
 
       // ---------------- expertise CRUD + governance ----------------
@@ -330,7 +395,7 @@ export const useStore = create(
           status: 'draft',
           version: '0.1',
           owner: get().user.name,
-          ownerRole: '',
+          ownerRole: get().user.title || '',
           reviewer: null,
           keywords: [],
           usageCount: 0,
@@ -359,6 +424,11 @@ export const useStore = create(
       deleteExpertise: (id) => set((s) => ({ expertise: s.expertise.filter((e) => e.id !== id) })),
 
       submitForReview: (id) => {
+        const e = get().expertise.find((x) => x.id === id)
+        const block = contributeBlock(get().user, e?.domain)
+        if (block) { get().showToast(block); return }
+        const r = readiness(e)
+        if (!r.ready) { get().showToast(`Not ready for review — still needs: ${r.missing.map((m) => m.label.toLowerCase()).join('; ')}`); return }
         get().updateExpertise(id, { status: 'in_review' })
         get().showToast('Submitted for review')
       },
@@ -422,6 +492,9 @@ export const useStore = create(
       },
 
       proposeRevision: (expertiseId, changes, reason) => {
+        const e = get().expertise.find((x) => x.id === expertiseId)
+        const block = contributeBlock(get().user, e?.domain)
+        if (block) { get().showToast(block); return }
         set((s) => ({
           proposals: [
             { id: uid('prop'), expertiseId, type: 'revision', createdAt: now(), author: get().user.name, reason, changes },
@@ -438,6 +511,10 @@ export const useStore = create(
       captureMeetingInsights: ({ meetingId, title, links }) => {
         const user = get().user.name
         const source = (excerpt) => ({ type: 'meeting', meetingId, title, excerpt: excerpt.slice(0, 200), date: now() })
+        // Same rule as chat capture: only links into the user's own expert domains are kept.
+        const domainOf = (l) => (l.expertiseId ? get().expertise.find((x) => x.id === l.expertiseId)?.domain : l.newExpertise?.domain)
+        const skipped = links.filter((l) => !canContribute(get().user, domainOf(l))).length
+        links = links.filter((l) => canContribute(get().user, domainOf(l)))
         const proposals = []
         const byExisting = new Map()
         const byNew = new Map()
@@ -488,7 +565,7 @@ export const useStore = create(
           }))
         }
         if (proposals.length) set((s) => ({ proposals: [...proposals, ...s.proposals] }))
-        return { proposals: proposals.length, drafts: drafts.length }
+        return { proposals: proposals.length, drafts: drafts.length, skipped }
       },
 
       rejectProposal: (pid) => {
@@ -517,11 +594,15 @@ export const useStore = create(
       // Any stream interrupted by a reload is marked finished.
       onRehydrateStorage: () => (state) => {
         if (!state) return
+        state.user = normalizeUser(state.user)
         state.chats = state.chats.map((c) => ({
           ...c,
-          messages: c.messages.map((m) =>
-            m.responses ? { ...m, responses: m.responses.map((r) => ({ ...r, streaming: false })) } : m,
-          ),
+          messages: c.messages.map((m) => {
+            if (!m.responses) return m
+            const out = { ...m, responses: m.responses.map((r) => ({ ...r, streaming: false })) }
+            // a capture check interrupted by a reload is simply dropped
+            return out.detectionState === 'checking' ? { ...out, detectionState: null } : out
+          }),
         }))
       },
     },

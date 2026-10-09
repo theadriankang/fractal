@@ -41,6 +41,7 @@ Restart uvicorn after editing `.env`; `--reload` only watches Python files.
 | GET    | `/api/chats/{id}` | Get a single chat |
 | PATCH  | `/api/chats/{id}` | Update chat title / folder / pinned |
 | DELETE | `/api/chats/{id}` | Delete a chat |
+| POST   | `/api/expertise/extract` | Know-how capture: did the user share reusable know-how in this exchange? (contributors only) |
 
 ### `POST /api/chat/stream`
 
@@ -56,6 +57,28 @@ Body:
 
 Events, in order: `meta {expertise: [{id, version}]}` (the Expertise actually applied), then
 `delta {text}` repeatedly, then `done {stopReason, model}` or `error {message}`.
+
+## Know-how capture (`POST /api/expertise/extract`)
+
+After a chat answer finishes, the front end sends the last few turns, the taxonomy and up to 5
+similar approved Expertise. One Claude call (`EXTRACTION_MODEL`, default `claude-haiku-5-5`)
+proposes `none | new | revision` with an evidence quote per line; `app/capture/extract.py`
+then validates everything in plain Python:
+
+- domain/topic must exist in the taxonomy; a revision must name a real candidate Expertise
+- every line's quote must actually come from the **user's** words (not the assistant's) — otherwise it is dropped
+- lines already in the target Expertise are dropped; confidence < `EXTRACTION_THRESHOLD` (0.6) → `none`
+- **domain scope:** reviewers get 403; for contributors the result carries `allowed` — true only if the
+  target domain is one of the user's expert domains (`profiles.domains`, migration `20261010140000_profiles_expert_domains.sql`)
+
+Until Supabase Auth lands the user (`name, role, domains`) is sent in the request body; once JWT auth
+exists it must come from the verified profile instead.
+
+```bash
+.venv/bin/pip install pytest
+.venv/bin/python -m pytest -q tests                # offline: validation + access rules (Claude stubbed)
+.venv/bin/python -m scripts.eval_capture           # live: 20 realistic messages, prints a score (needs ANTHROPIC_API_KEY)
+```
 
 ## Auth (stub)
 
