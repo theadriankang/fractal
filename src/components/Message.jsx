@@ -77,13 +77,14 @@ function ResponseCard({ chatId, msg, idx, compare }) {
       <div className="prose prose-sm mt-2 max-w-none dark:prose-invert prose-p:leading-relaxed prose-li:my-0.5 sm:prose-base sm:text-[15px]">
         {r.content ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.content}</ReactMarkdown>
-        ) : (
+        ) : r.error ? null : (
           <div className="flex gap-1 py-2">
             {[0, 1, 2].map((i) => <span key={i} className="h-2 w-2 animate-pulse rounded-full bg-gray-400" style={{ animationDelay: `${i * 150}ms` }} />)}
           </div>
         )}
         {r.streaming && r.content && <span className="ml-0.5 inline-block h-4 w-2 translate-y-0.5 animate-blink bg-gray-400" />}
       </div>
+      {r.error && <p className="mt-2 text-sm text-red-500">{r.error}</p>}
 
       {!r.streaming && (
         <>
