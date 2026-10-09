@@ -8,9 +8,10 @@ import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
 import { isLive, streamChat, extractKnowhow } from './lib/api'
 import { DEMO_USERS, authenticate, userById } from './data/users'
-import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit } from './lib/permissions'
+import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit, deleteBlock } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
 import { readiness } from './lib/readiness'
+import { helpfulStats, responseKey, upsertFeedback } from './lib/ratings'
 
 const uid = (p = 'id') => `${p}-${Math.random().toString(36).slice(2, 9)}`
 const now = () => new Date().toISOString()
@@ -268,30 +269,36 @@ export const useStore = create(
         const matched = get().expertise.filter((e) => r.expertise.some((x) => x.id === e.id))
         get().patchMessage(chatId, msgId, (m) => ({
           ...m,
-          responses: m.responses.map((x, k) => (k === idx ? { ...x, content: '', streaming: true, rating: null, error: undefined } : x)),
+          responses: m.responses.map((x, k) => (k === idx ? { ...x, rid: uid('r'), content: '', streaming: true, rating: null, error: undefined } : x)),
         }))
         const cancel = streamResponse(get, chatId, msgId, idx, { prompt, matched })
         streams.set(msgId, [...(streams.get(msgId) || []), cancel])
       },
 
-      // Rating feeds the Expertise feedback loop.
+      // Rating feeds the Expertise feedback loop. One rating per person per answer: a new rating
+      // replaces the earlier one, and clicking the same thumb again (without a comment) takes it back.
       rateResponse: (chatId, msgId, idx, rating, comment = '') => {
         const chat = get().chats.find((c) => c.id === chatId)
         const r = chat.messages.find((m) => m.id === msgId).responses[idx]
+        const undo = r.rating === rating && !comment.trim()
+        const next = undo ? null : rating
         get().patchMessage(chatId, msgId, (m) => ({
           ...m,
-          responses: m.responses.map((x, k) => (k === idx ? { ...x, rating } : x)),
+          responses: m.responses.map((x, k) => (k === idx ? { ...x, rating: next } : x)),
         }))
         if (!r.expertise.length) return
-        const user = get().user.name
+        const { id: userId, name: user } = get().user
+        const key = responseKey(msgId, idx, r)
         set((s) => ({
-          expertise: s.expertise.map((e) =>
-            r.expertise.some((x) => x.id === e.id)
-              ? { ...e, feedback: [{ user, rating, comment, date: now(), chatId }, ...e.feedback] }
-              : e,
-          ),
+          expertise: s.expertise.map((e) => {
+            const ref = r.expertise.find((x) => x.id === e.id)
+            if (!ref) return e
+            const entry = next && { user, userId, rating: next, comment, date: now(), chatId, responseKey: key, version: ref.version }
+            const feedback = upsertFeedback(e.feedback, key, userId, entry)
+            return { ...e, feedback, successRate: helpfulStats({ feedback }).rate }
+          }),
         }))
-        if (rating === 'down' && comment.trim()) {
+        if (next === 'down' && comment.trim()) {
           const target = r.expertise[0].id
           const te = get().expertise.find((e) => e.id === target)
           const block = te && contributeBlock(get().user, te.domain)
@@ -453,13 +460,17 @@ export const useStore = create(
       updateExpertise: (id, patch) =>
         set((s) => ({ expertise: s.expertise.map((e) => (e.id === id ? { ...e, ...patch, updatedAt: now() } : e)) })),
 
+      // Live Expertise is never deleted outright: it is deprecated first (reversible), and only then
+      // can the Reviewer delete it. Drafts can be deleted by the Reviewer or an expert in the domain.
       deleteExpertise: (id) => {
         const e = get().expertise.find((x) => x.id === id)
-        if (!canGovern(get().user) && !(e?.status === 'draft' && canEdit(get().user, e))) {
-          get().showToast('Only the Reviewer, or a domain expert for a draft, can delete Expertise.')
-          return false
-        }
-        set((s) => ({ expertise: s.expertise.filter((x) => x.id !== id) }))
+        const block = deleteBlock(get().user, e)
+        if (block) { get().showToast(block); return false }
+        set((s) => ({
+          expertise: s.expertise.filter((x) => x.id !== id),
+          proposals: s.proposals.filter((p) => p.expertiseId !== id),
+        }))
+        get().showToast(`Deleted “${e.name}”`)
         return true
       },
 

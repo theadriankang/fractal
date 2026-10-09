@@ -7,9 +7,10 @@ import {
 import { useStore } from '../store'
 import { CONTENT_FIELDS } from '../data/expertise'
 import { TAXONOMY, ASSET_TYPES, domainMeta, slugify, flatOrder } from '../data/taxonomy'
-import { StatusBadge, fmtDate, timeAgo, Dropdown } from '../components/ui'
+import { StatusBadge, fmtDate, timeAgo, Dropdown, Modal } from '../components/ui'
 import { Breadcrumb } from './ExpertiseLayout'
-import { canEdit, contributeBlock, canGovern, reviewBlock } from '../lib/permissions'
+import { canEdit, contributeBlock, canGovern, reviewBlock, deleteBlock } from '../lib/permissions'
+import { helpfulStats, fmtRate } from '../lib/ratings'
 import { readiness } from '../lib/readiness'
 
 const LIST_SECTIONS = [
@@ -309,8 +310,13 @@ export default function ExpertiseDetail() {
   const e = expertise.find((x) => x.id === id)
   const edit = params.get('edit') === '1'
   const [draft, setDraft] = useState(null)
+  // Keywords are edited as free text and split into a list as you type, so commas and spaces stay put.
+  const [keywordsText, setKeywordsText] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
-  useEffect(() => { if (e && edit) setDraft(structuredClone(e)) }, [edit, id]) // eslint-disable-line
+  useEffect(() => {
+    if (e && edit) { setDraft(structuredClone(e)); setKeywordsText(e.keywords.join(', ')) }
+  }, [edit, id]) // eslint-disable-line
   useEffect(() => { document.getElementById('expertise-scroll')?.scrollTo({ top: 0 }) }, [id])
 
   const order = useMemo(() => flatOrder(expertise), [expertise])
@@ -330,7 +336,7 @@ export default function ExpertiseDetail() {
 
   const governs = canGovern(user)
   const decideBlock = reviewBlock(user, e.domain, e)
-  const mayDelete = governs || (e.status === 'draft' && canEdit(user, e))
+  const delBlock = deleteBlock(user, e)
   // Content can only be changed by contributors who are experts in this Expertise's domain.
   const mayEdit = canEdit(user, e)
   const editBlock = contributeBlock(user, e.domain)
@@ -362,8 +368,9 @@ export default function ExpertiseDetail() {
     setParams({})
   }
 
-  const up = e.feedback.filter((f) => f.rating === 'up').length
-  const helpful = e.successRate != null ? `${Math.round(e.successRate * 100)}%` : e.feedback.length ? `${Math.round((up / e.feedback.length) * 100)}%` : '—'
+  // Computed from the stored ratings, so it moves as people rate answers.
+  const rated = helpfulStats(e)
+  const helpful = rated.total ? `${fmtRate(rated.rate)} helpful (${rated.total} rating${rated.total > 1 ? 's' : ''})` : 'no ratings yet'
 
   return (
     <div className="mx-auto flex max-w-6xl gap-10 px-8">
@@ -416,8 +423,19 @@ export default function ExpertiseDetail() {
                 <Dropdown align="right" trigger={() => <button className="btn-ghost px-2">•••</button>}>
                   {e.status === 'approved' && <button className="menu-item disabled:opacity-40" disabled={!governs} title={governs ? '' : 'Only the Reviewer can deprecate'} onClick={() => deprecateExpertise(e.id)}><Archive size={15} /> Deprecate</button>}
                   {e.status === 'deprecated' && <button className="menu-item disabled:opacity-40" disabled={!governs} title={governs ? '' : 'Only the Reviewer can restore'} onClick={() => restoreExpertise(e.id)}><RotateCcw size={15} /> Restore</button>}
-                  <button className="menu-item text-red-500 disabled:opacity-40" disabled={!mayDelete} title={mayDelete ? '' : 'Only the Reviewer, or a domain expert for a draft, can delete'} onClick={() => { if (deleteExpertise(e.id)) navigate('/expertise') }}><Trash2 size={15} /> Delete</button>
+                  <button className="menu-item text-red-500 disabled:opacity-40" disabled={!!delBlock} title={delBlock || ''} onClick={() => setConfirmDelete(true)}><Trash2 size={15} /> Delete</button>
                 </Dropdown>
+                <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete this Expertise?">
+                  <div className="px-5 pb-5 pt-2 text-sm">
+                    <p className="text-gray-600 dark:text-gray-400">
+                      “{e.name}” ({e.status.replace('_', ' ')}, v{e.version}) and its open proposals will be removed. This can’t be undone.
+                    </p>
+                    <div className="mt-4 flex justify-end gap-2">
+                      <button className="btn-ghost" onClick={() => setConfirmDelete(false)}>Cancel</button>
+                      <button className="btn bg-red-600 text-white hover:bg-red-500" onClick={() => { setConfirmDelete(false); if (deleteExpertise(e.id)) navigate('/expertise') }}><Trash2 size={14} /> Delete</button>
+                    </div>
+                  </div>
+                </Modal>
               </>
             )}
           </div>
@@ -447,7 +465,8 @@ export default function ExpertiseDetail() {
               <input className="input" value={draft.owner} onChange={(ev) => set({ owner: ev.target.value })} />
             </label>
             <label className="text-sm"><span className="label mb-1 block">Trigger keywords</span>
-              <input className="input" value={draft.keywords.join(', ')} onChange={(ev) => set({ keywords: ev.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+              <input className="input" value={keywordsText} placeholder="chiller, chw, too warm"
+                onChange={(ev) => { setKeywordsText(ev.target.value); set({ keywords: ev.target.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) }) }} />
             </label>
             <div className="text-sm sm:col-span-2"><span className="label mb-1.5 block">Asset types</span>
               <div className="flex flex-wrap gap-1.5">
@@ -470,7 +489,7 @@ export default function ExpertiseDetail() {
             <span><span className="text-gray-500">Owner </span>{e.owner}</span>
             <span><span className="text-gray-500">Reviewer </span>{e.reviewer || '—'}</span>
             <span className="text-gray-500">Updated {timeAgo(e.updatedAt)}</span>
-            <span className="text-gray-500">{e.usageCount} uses · {helpful} helpful</span>
+            <span className="text-gray-500">{e.usageCount} uses · {helpful}</span>
             <span className="flex gap-1">{(e.assetTypes || []).map((a) => <span key={a} className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-400">{a}</span>)}</span>
           </div>
         )}

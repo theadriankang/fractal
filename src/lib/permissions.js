@@ -60,3 +60,17 @@ export const canReview = (user, domain, item) => !reviewBlock(user, domain, item
 
 /** Rollback, deprecate and restore change what is live for everyone: head reviewer only. */
 export const canGovern = (user) => isReviewer(user)
+
+/**
+ * May `user` delete this Expertise? Returns null if allowed, otherwise the reason.
+ * Live (approved) Expertise is never deleted directly — the Reviewer deprecates it first, which is
+ * reversible. Drafts can be deleted by the Reviewer or an expert in the domain; anything else
+ * (in review, deprecated) only by the Reviewer.
+ */
+export function deleteBlock(user, e) {
+  if (!e) return 'Expertise not found.'
+  if (e.status === 'approved') return 'Live Expertise can’t be deleted. Deprecate it first (Reviewer only).'
+  if (canGovern(user)) return null
+  if (e.status === 'draft' && canEdit(user, e)) return null
+  return e.status === 'draft' ? `Only ${e.domain} experts or the Reviewer can delete this draft.` : 'Only the Reviewer can delete this.'
+}

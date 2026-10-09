@@ -5,6 +5,7 @@ import { canContribute, contributeBlock } from '../lib/permissions'
 import { TAXONOMY, buildTree, slugify, domainBySlug } from '../data/taxonomy'
 import { StatusBadge, timeAgo } from '../components/ui'
 import { Breadcrumb } from './ExpertiseLayout'
+import { averageHelpful, fmtRate } from '../lib/ratings'
 
 function Stat({ icon: Icon, label, value }) {
   return (
@@ -33,8 +34,8 @@ export default function ExpertiseHome() {
   const approved = expertise.filter((e) => e.status === 'approved')
   const uses = expertise.reduce((a, e) => a + e.usageCount, 0)
   const owners = new Set(expertise.map((e) => e.owner)).size
-  const rated = approved.filter((e) => e.successRate != null)
-  const success = rated.length ? Math.round((rated.reduce((a, e) => a + e.successRate, 0) / rated.length) * 100) : 0
+  // Average of each approved Expertise's 👍 share, from the ratings actually stored.
+  const success = fmtRate(averageHelpful(approved))
   const recent = [...expertise].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5)
   const popular = [...approved].sort((a, b) => b.usageCount - a.usageCount).slice(0, 5)
 
@@ -49,7 +50,7 @@ export default function ExpertiseHome() {
       <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat icon={BookOpenCheck} label="Approved Expertise" value={approved.length} />
         <Stat icon={TrendingUp} label="Times applied" value={uses} />
-        <Stat icon={ShieldCheck} label="Avg. helpful rating" value={`${success}%`} />
+        <Stat icon={ShieldCheck} label="Avg. helpful rating" value={success} />
         <Stat icon={Users} label="Experts contributing" value={owners} />
       </div>
 

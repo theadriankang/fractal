@@ -8,7 +8,8 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 //       -> { insights } (structured, from Claude). Nothing is stored; files are discarded after the call.
 //       Two-stage pipeline: (1) extract summary / takeaways / actions, then (2) a "category selector" pass
 //       that routes each reusable takeaway to the Expertise it belongs to (or proposes a new one).
-//  POST { action: "save", record } -> { meeting } (inserted with status 'approved')
+//  POST { action: "save", record } -> { meeting } (inserted with status 'approved'; records who saved it:
+//       the Supabase session user when there is one, else record.recorded_by / recorded_by_id from the demo sign-in)
 //  POST { action: "list", limit? } -> { meetings } (recent approved meetings, read-only)
 // Secrets: ANTHROPIC_API_KEY (required), CLAUDE_MODEL (optional override).
 
@@ -228,7 +229,20 @@ async function insights(body: any) {
   return json({ insights: out });
 }
 
-async function save(body: any) {
+// The signed-in Supabase user behind this request, if any (the anon key alone is not a user).
+async function sessionUser(req: Request) {
+  const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!token) return null;
+  try {
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data } = await db.auth.getUser(token);
+    return data?.user ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function save(body: any, req: Request) {
   const r = body.record ?? {};
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   const row = {
@@ -254,7 +268,17 @@ async function save(body: any) {
       : [],
     duration: Number.isFinite(r.duration) ? Math.max(0, Math.round(r.duration)) : 0,
     status: "approved",
+    // Who recorded it. A real Supabase session wins over the name the browser sends (demo sign-in).
+    recorded_by: str(r.recorded_by).slice(0, 120),
+    recorded_by_id: str(r.recorded_by_id).slice(0, 80),
+    user_id: null as string | null,
   };
+  const user = await sessionUser(req);
+  if (user) {
+    row.user_id = user.id;
+    row.recorded_by_id = user.id;
+    row.recorded_by ||= str(user.user_metadata?.name) || str(user.email);
+  }
   if (!row.raw_transcript.trim()) return json({ error: "Transcript is empty." }, 400);
   const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const { data, error } = await db.from("meetings").insert(row).select().single();
@@ -266,7 +290,7 @@ async function list(body: any) {
   const limit = Math.min(50, Math.max(1, Number(body.limit) || 10));
   const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const { data, error } = await db.from("meetings")
-    .select("id, title, raw_transcript, cleaned_transcript, attached_files, summary, key_takeaways, action_items, expertise_links, duration, created_at")
+    .select("id, title, raw_transcript, cleaned_transcript, attached_files, summary, key_takeaways, action_items, expertise_links, duration, recorded_by, recorded_by_id, created_at")
     .order("created_at", { ascending: false }).limit(limit);
   if (error) return json({ error: error.message }, 500);
   return json({ meetings: data });
@@ -278,7 +302,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     if (body.action === "insights") return await insights(body);
-    if (body.action === "save") return await save(body);
+    if (body.action === "save") return await save(body, req);
     if (body.action === "list") return await list(body);
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
