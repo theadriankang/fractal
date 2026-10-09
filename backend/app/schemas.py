@@ -154,6 +154,7 @@ class FeedbackOut(CamelModel):
     user_name: str = ""
     rating: str
     comment: str = ""
+    chat_id: Optional[str] = None
     date: Optional[datetime] = None
 
 
@@ -245,3 +246,44 @@ class ChatStreamRequest(BaseModel):
     messages: list[ChatTurn] = Field(min_length=1, max_length=40)
     expertise: list[ExpertiseIn] = Field(default=[], max_length=10)
     routing: RoutingIn | None = None
+
+
+# ===========================================================================
+# Governance schemas
+# ===========================================================================
+
+class ApproveBody(BaseModel):
+    note: str = "Approved"
+
+
+class RejectBody(BaseModel):
+    reason: str = ""
+
+
+class RollbackBody(BaseModel):
+    version: str
+
+
+class ProposalCreate(BaseModel):
+    expertiseId: str
+    reason: str = ""
+    changes: dict = Field(default_factory=dict)
+    chatId: Optional[str] = None
+
+
+class FeedbackCreate(BaseModel):
+    rating: Literal["up", "down"]
+    comment: str = ""
+    chatId: Optional[str] = None
+
+
+class AuditOut(BaseModel):
+    id: int
+    at: Optional[datetime] = None
+    actor: Optional[str] = None
+    actorRole: Optional[str] = None
+    action: str = ""
+    targetType: Optional[str] = None
+    targetId: Optional[str] = None
+    detail: dict = Field(default_factory=dict)
+
