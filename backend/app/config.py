@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # Thinking depth for chat answers: low | medium | high | xhigh | max.
     claude_effort: str = "medium"
 
+    # Know-how capture from chat (POST /api/expertise/extract)
+    extraction_model: str = "claude-haiku-5-5"
+    extraction_threshold: float = 0.6  # below this confidence, nothing is proposed
+    extraction_min_words: int = 12  # skip short messages (questions, small talk)
+
     # CORS
     cors_origins: list[str] = ["http://localhost:5173"]
 

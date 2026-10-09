@@ -1,9 +1,28 @@
 import { Link } from 'react-router-dom'
-import { Check, X, Sparkles, GitPullRequestArrow, FileEdit, ShieldAlert, MessageSquare, Mic } from 'lucide-react'
+import { Check, X, Sparkles, GitPullRequestArrow, FileEdit, ShieldAlert, MessageSquare, Mic, Quote, AlertTriangle } from 'lucide-react'
+import { canEdit, contributeBlock } from '../lib/permissions'
+import { readiness } from '../lib/readiness'
+import { similarExpertise } from '../lib/capture'
 import { useStore } from '../store'
 import { domainGradient } from '../data/taxonomy'
 import { Breadcrumb } from './ExpertiseLayout'
 import { StatusBadge, timeAgo } from '../components/ui'
+
+// Where a captured item came from: the expert's own words + the extractor's confidence.
+function Provenance({ sources, capture }) {
+  const src = sources?.find((x) => x.type === 'conversation' || x.type === 'meeting')
+  if (!src && !capture) return null
+  return (
+    <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-400 dark:ring-gray-800">
+      {src?.excerpt && <p className="flex gap-1.5 italic"><Quote size={12} className="mt-0.5 shrink-0" /> {src.excerpt}</p>}
+      <p className="mt-1 text-gray-500">
+        {capture?.capturedBy || src?.capturedBy ? `Said by ${capture?.capturedBy || src.capturedBy}` : 'Source'}
+        {capture?.confidence != null && ` · extractor confidence ${Math.round(capture.confidence * 100)}%`}
+        {capture?.detector === 'keyword' && ' · keyword match (offline)'}
+      </p>
+    </div>
+  )
+}
 
 const FIELD_LABELS = {
   knowledge: 'Knowledge & heuristics',
@@ -17,7 +36,7 @@ function RoleNotice() {
   if (role === 'reviewer') return null
   return (
     <div className="mt-4 flex items-center gap-2 rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-600 ring-1 ring-amber-500/25 dark:text-amber-400">
-      <ShieldAlert size={16} /> You're a Contributor. Only Reviewers can approve changes — switch roles from the user menu to try it.
+      <ShieldAlert size={16} /> You're signed in as a Contributor. Only Reviewers can approve changes — sign in as a Reviewer from the user menu to try it.
     </div>
   )
 }
@@ -47,6 +66,7 @@ function ProposalCard({ p }) {
               </div>
             ))}
           </div>
+          {p.capture && <Provenance sources={p.sources} capture={p.capture} />}
           {p.chatId && <Link to={`/c/${p.chatId}`} className="mt-2 inline-block text-xs text-accent-500 hover:underline">View source conversation →</Link>}
           {p.meetingTitle && <p className="mt-2 flex items-center gap-1.5 text-xs text-gray-500"><Mic size={12} /> From meeting: {p.meetingTitle} · <Link to="/meetings" className="text-accent-500 hover:underline">Meeting Recorder →</Link></p>}
         </div>
@@ -60,8 +80,13 @@ function ProposalCard({ p }) {
 }
 
 function DraftCard({ e }) {
-  const { approveExpertise, rejectExpertise, submitForReview, user } = useStore()
+  const { approveExpertise, rejectExpertise, submitForReview, user, expertise } = useStore()
   const canReview = user.role === 'reviewer'
+  const mayEdit = canEdit(user, e)
+  const block = contributeBlock(user, e.domain)
+  const { missing } = readiness(e)
+  // Possible near-duplicate in the same domain, so the reviewer can merge instead of approving twice.
+  const overlap = similarExpertise(`${e.name} ${e.summary} ${e.knowledge.join(' ')}`, expertise.filter((x) => x.id !== e.id && x.domain === e.domain), [], 1)[0]
   return (
     <div className="card p-4">
       <div className="flex items-start gap-3">
@@ -81,12 +106,22 @@ function DraftCard({ e }) {
             <span>{e.knowledge.length} knowledge items</span>
             <span>{e.decisionLogic.length} decision steps</span>
             <span className={e.guardrails.length ? '' : 'text-amber-500'}>{e.guardrails.length} guardrails</span>
+            <span className={e.escalation.length ? '' : 'text-amber-500'}>{e.escalation.length} escalation rules</span>
           </div>
+          {e.origin === 'auto-detected' && <Provenance sources={e.sources} capture={e.capture} />}
+          {overlap && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-500">
+              <AlertTriangle size={12} /> Possible overlap with <Link to={`/expertise/${overlap.id}`} className="underline">{overlap.name}</Link> — consider a revision instead.
+            </p>
+          )}
+          {e.status === 'draft' && missing.length > 0 && (
+            <p className="mt-1 text-xs text-gray-500">Still needs: {missing.map((m) => m.label.toLowerCase()).join('; ')}</p>
+          )}
         </div>
         <div className="flex shrink-0 gap-1.5">
-          <Link to={`/expertise/${e.id}?edit=1`} className="btn-outline">Edit</Link>
+          {mayEdit && <Link to={`/expertise/${e.id}?edit=1`} className="btn-outline">Edit</Link>}
           {e.status === 'draft' ? (
-            <button className="btn-primary" onClick={() => submitForReview(e.id)}>Submit for review</button>
+            <button className="btn-primary" disabled={!mayEdit || missing.length > 0} title={block || (missing.length ? 'Complete the checklist on the draft first' : '')} onClick={() => submitForReview(e.id)}>Submit for review</button>
           ) : (
             <>
               <button className="btn-outline" disabled={!canReview} onClick={() => rejectExpertise(e.id)}><X size={15} /></button>
@@ -128,7 +163,7 @@ export default function ReviewQueue() {
           <Group title="Proposed revisions" desc="Changes to live Expertise, generated from feedback and conversations." n={proposals.length}>
             {proposals.map((p) => <ProposalCard key={p.id} p={p} />)}
           </Group>
-          <Group title="Drafts" desc="Captured or started, but not yet submitted. The owner should complete guardrails and decision logic first." n={drafts.length}>
+          <Group title="Drafts" desc="Captured or started, but not yet submitted. Only experts in the draft's domain can complete and submit it." n={drafts.length}>
             {drafts.map((e) => <DraftCard key={e.id} e={e} />)}
           </Group>
         </div>

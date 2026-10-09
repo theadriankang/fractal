@@ -9,6 +9,7 @@ import { useMeetingRecorder, joinBlocks } from '../hooks/useMeetingRecorder'
 import { hasSupabase } from '../lib/supabase'
 import { ACCEPT, MAX_FILES } from '../lib/readAttachment'
 import { listMeetings } from '../lib/meetingsService'
+import { canContribute, contributeBlock, isContributor } from '../lib/permissions'
 import { TAXONOMY } from '../data/taxonomy'
 import { Logo } from '../components/ui'
 import TopBar from '../components/TopBar'
@@ -310,9 +311,13 @@ function Confidence({ value }) {
 }
 
 function LinkRow({ link, rec, expertise, readOnly }) {
+  const user = useStore((s) => s.user)
   const target = expertise.find((e) => e.id === link.expertiseId)
   const isNew = !link.expertiseId
   const set = (patch) => rec.updateLink(link.key, patch)
+  // Same rule as chat capture: only contributors who are experts in the target domain may route to it.
+  const block = contributeBlock(user, isNew ? link.newExpertise?.domain : target?.domain)
+  const myDomains = TAXONOMY.filter((t) => user.domains?.includes(t.domain))
 
   if (readOnly)
     return (
@@ -328,18 +333,20 @@ function LinkRow({ link, rec, expertise, readOnly }) {
       </div>
     )
 
-  const domains = TAXONOMY.map((t) => ({ ...t, items: expertise.filter((e) => e.domain === t.domain) })).filter((d) => d.items.length)
+  const domains = TAXONOMY.map((t) => ({ ...t, items: expertise.filter((e) => e.domain === t.domain) }))
+    .filter((d) => d.items.length && (user.domains?.includes(d.domain) || d.domain === target?.domain))
   const topics = TAXONOMY.find((t) => t.domain === link.newExpertise?.domain)?.topics || []
   return (
-    <div className={`space-y-2 rounded-lg bg-white p-2.5 ring-1 ring-gray-200 transition dark:bg-gray-850 dark:ring-gray-800 ${link.include ? '' : 'opacity-50'}`}>
+    <div className={`space-y-2 rounded-lg bg-white p-2.5 ring-1 ring-gray-200 transition dark:bg-gray-850 dark:ring-gray-800 ${link.include && !block ? '' : 'opacity-50'}`}>
       <div className="flex flex-wrap items-center gap-1.5">
-        <input type="checkbox" className="accent-emerald-500" checked={link.include} onChange={(e) => set({ include: e.target.checked })} title="Send to the Review Queue on approval" />
+        <input type="checkbox" className="accent-emerald-500" disabled={!!block} checked={link.include && !block} onChange={(e) => set({ include: e.target.checked })} title={block || 'Send to the Review Queue on approval'} />
         <select
           className={`${sel} max-w-[220px] flex-1`}
           value={isNew ? 'new' : link.expertiseId}
           onChange={(e) => {
             const v = e.target.value
-            if (v === 'new') set({ expertiseId: null, newExpertise: link.newExpertise || { name: '', domain: TAXONOMY[0].domain, topic: TAXONOMY[0].topics[0] } })
+            const home = myDomains[0] || TAXONOMY[0]
+            if (v === 'new') set({ expertiseId: null, newExpertise: link.newExpertise || { name: '', domain: home.domain, topic: home.topics[0] } })
             else set({ expertiseId: v })
           }}
           aria-label="Target Expertise"
@@ -361,7 +368,7 @@ function LinkRow({ link, rec, expertise, readOnly }) {
         <div className="flex flex-wrap gap-1.5">
           <input className={`${sel} flex-1`} placeholder="New Expertise name" value={link.newExpertise?.name || ''} onChange={(e) => set({ newExpertise: { ...link.newExpertise, name: e.target.value } })} />
           <select className={sel} value={link.newExpertise?.domain} onChange={(e) => set({ newExpertise: { ...link.newExpertise, domain: e.target.value, topic: TAXONOMY.find((t) => t.domain === e.target.value).topics[0] } })}>
-            {TAXONOMY.map((t) => <option key={t.domain}>{t.domain}</option>)}
+            {[...new Set([...myDomains.map((t) => t.domain), link.newExpertise?.domain].filter(Boolean))].map((d) => <option key={d}>{d}</option>)}
           </select>
           <select className={sel} value={link.newExpertise?.topic} onChange={(e) => set({ newExpertise: { ...link.newExpertise, topic: e.target.value } })}>
             {[...new Set([...topics, link.newExpertise?.topic].filter(Boolean))].map((t) => <option key={t}>{t}</option>)}
@@ -376,6 +383,7 @@ function LinkRow({ link, rec, expertise, readOnly }) {
         aria-label="Line to add to the Expertise"
       />
       {link.rationale && <p className="text-[11px] text-gray-500">{link.rationale}</p>}
+      {block && <p className="flex items-center gap-1 text-[11px] text-amber-500"><Lock size={11} /> {block}</p>}
     </div>
   )
 }
@@ -383,7 +391,9 @@ function LinkRow({ link, rec, expertise, readOnly }) {
 function TakeawaysCard({ rec, readOnly }) {
   const expertise = useStore((s) => s.expertise).filter((e) => e.status !== 'deprecated')
   const ins = rec.insights
-  const routed = rec.links.filter((l) => l.include).length
+  const user = useStore((s) => s.user)
+  const domainOf = (l) => (l.expertiseId ? expertise.find((e) => e.id === l.expertiseId)?.domain : l.newExpertise?.domain)
+  const routed = rec.links.filter((l) => l.include && canContribute(user, domainOf(l))).length
   return (
     <Card title="Key takeaways & decisions">
       {ins.key_takeaways.length ? (
@@ -417,7 +427,10 @@ function TakeawaysCard({ rec, readOnly }) {
           {ins.category_error && !readOnly && (
             <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-400"><AlertTriangle size={13} /> Category selector unavailable ({ins.category_error}). You can still link takeaways manually.</p>
           )}
-          {!readOnly && <p className="mt-3 text-[11px] text-gray-500">{routed} link{routed === 1 ? '' : 's'} will be sent to the Review Queue when you approve. Live Expertise only changes after a Reviewer merges them.</p>}
+          {!readOnly && !isContributor(user) && (
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-500"><Lock size={12} /> You're signed in as a Reviewer. Reviewers approve know-how but don't contribute it — sign in as a domain expert to send these links to the Review Queue.</p>
+          )}
+          {!readOnly && <p className="mt-3 text-[11px] text-gray-500">{routed} link{routed === 1 ? '' : 's'} will be sent to the Review Queue when you approve. Only links into your own expert domains ({(user.domains || []).join(', ') || 'none'}) can be sent. Live Expertise only changes after a Reviewer merges them.</p>}
         </>
       ) : <p className="text-sm text-gray-500">None identified.</p>}
     </Card>
@@ -501,7 +514,7 @@ function InsightsDrawer({ rec }) {
                 <p className="flex items-center gap-1.5 text-xs text-gray-500">
                   <Route size={13} />
                   {[rec.captured.proposals && `${rec.captured.proposals} Expertise revision${rec.captured.proposals > 1 ? 's' : ''}`,
-                    rec.captured.drafts && `${rec.captured.drafts} new Expertise draft${rec.captured.drafts > 1 ? 's' : ''}`].filter(Boolean).join(' and ')} sent for review ·
+                    rec.captured.drafts && `${rec.captured.drafts} new Expertise draft${rec.captured.drafts > 1 ? 's' : ''}`].filter(Boolean).join(' and ')} sent for review{rec.captured.skipped ? ` (${rec.captured.skipped} outside your domains skipped)` : ''} ·
                   <Link to="/expertise/review" className="text-accent-500 hover:underline">Open Review Queue →</Link>
                 </p>
               )}

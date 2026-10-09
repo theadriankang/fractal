@@ -54,7 +54,8 @@ Browser (React)
 id, name, domain, topic, assetTypes[], status ('draft'|'in_review'|'approved'|'deprecated'), version ('1.3'),
 owner, ownerRole, reviewer, keywords[], usageCount, successRate (0–1|null), createdAt, updatedAt,
 summary, whenToUse, knowledge[], decisionLogic[], guardrails[], escalation[],
-related[] (expertise ids), sources[{type:'conversation'|'interview'|'meeting'|'document', chatId?, meetingId?, title, excerpt, date}],
+related[] (expertise ids), sources[{type:'conversation'|'interview'|'meeting'|'document', chatId?, meetingId?, title, excerpt, date, capturedBy?}],
+capture? {confidence, reason, detector:'ai'|'keyword', capturedBy} (auto-detected drafts),
 versions[{version, date, author, approvedBy, note, snapshot:{summary,whenToUse,knowledge,decisionLogic,guardrails,escalation}}],
 feedback[{user, rating:'up'|'down', comment, date, chatId?}], origin? ('auto-detected')
 ```
@@ -69,6 +70,22 @@ confidence score. The user can re-target, edit or untick each link in the Key In
 meeting is stored (with `expertise_links` for audit) and `captureMeetingInsights` in the store creates one revision
 proposal per touched Expertise, or an auto-detected draft for new ones. Live Expertise (and its SKILL.md export)
 changes only when a Reviewer merges them.
+
+## Who may contribute (domain-scoped)
+Users: `{id, name, title, role:'contributor'|'reviewer', domains:[taxonomy domains]}` (demo list: `src/data/users.js`;
+DB: `profiles.role` + `profiles.domains`). Rule (`src/lib/permissions.js`): **only a contributor who is an expert in an
+Expertise's domain may contribute to it** — capture from chat or meetings, propose revisions (incl. 👎 corrections),
+create/edit drafts, submit for review. Reviewers approve / reject / roll back / deprecate but never author, so nobody
+approves their own contribution. Enforced in the UI, again inside store actions, and in `/api/expertise/extract`.
+
+## Know-how capture from chat (AI Harvest)
+After an answer finishes (contributors only, user message ≥ 12 words) the store calls `POST /api/expertise/extract`
+(`src/lib/capture.js`, `backend/app/capture/`). Detection shape stored on the assistant message:
+`{kind:'new'|'revision', confidence, reason, source:'ai'|'keyword', target:{domain, topic, expertiseId?, expertiseName?},
+draft?:{name, domain, topic, assetTypes, summary, whenToUse, keywords}, items:[{field, text, quote}], allowed, blockedReason}`
+with `detectionState: 'checking'|'pending'|'saved'|'dismissed'`. Offline/mock answers fall back to the keyword detector.
+Saving creates an auto-detected draft (with `capture` metadata + the quoted source) or a revision proposal. Drafts must
+pass `src/lib/readiness.js` (summary, when to use, knowledge, ≥1 guardrail, ≥1 escalation) before "Submit for review".
 
 ## Chat message shape (see src/store.js sendMessage)
 User msg: `{id, role:'user', content, files[], attachedExpertise[ids], webSearch, createdAt}`

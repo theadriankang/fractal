@@ -5,6 +5,7 @@ import { generateInsights, saveMeeting } from '../lib/meetingsService'
 import { readAttachment, validateFile, MAX_FILES } from '../lib/readAttachment'
 import { useStore } from '../store'
 import { TAXONOMY } from '../data/taxonomy'
+import { canContribute } from '../lib/permissions'
 
 const uid = () => Math.random().toString(36).slice(2, 10)
 const PARAGRAPH_GAP_MS = 4000
@@ -172,7 +173,11 @@ export function useMeetingRecorder() {
     try {
       const parsed = await Promise.all(files.map((f) => readAttachment(f.file)))
       const result = await generateInsights({ transcript, files: parsed, expertise: expertiseCatalog(), taxonomy: taxonomyPayload() })
-      setInsights(result); setLinks((result.expertise_links || []).map(toLink)); setCaptured(null); setStage('insights')
+      // Links start ticked only when confident AND inside the user's own expert domains.
+      const { user, expertise } = useStore.getState()
+      const domainOf = (l) => (l.expertiseId ? expertise.find((e) => e.id === l.expertiseId)?.domain : l.newExpertise?.domain)
+      const links = (result.expertise_links || []).map(toLink).map((l) => ({ ...l, include: l.include && canContribute(user, domainOf(l)) }))
+      setInsights(result); setLinks(links); setCaptured(null); setStage('insights')
     } catch (e) {
       setError(e.message); setStage('review')
     }
@@ -198,7 +203,10 @@ export function useMeetingRecorder() {
     setLinks((ls) => [...ls, {
       key: uid(), takeawayIndex, expertiseId: null, field: 'knowledge', entry: text, confidence: null,
       rationale: 'Added manually', include: true, manual: true,
-      newExpertise: { name: '', domain: TAXONOMY[0].domain, topic: TAXONOMY[0].topics[0] },
+      newExpertise: (() => {
+        const home = TAXONOMY.find((t) => useStore.getState().user.domains?.includes(t.domain)) || TAXONOMY[0]
+        return { name: '', domain: home.domain, topic: home.topics[0] }
+      })(),
     }])
   }, [insights])
 
@@ -206,7 +214,9 @@ export function useMeetingRecorder() {
     if (!insights) return
     setError(null); setStage('saving')
     const nameOf = (id) => useStore.getState().expertise.find((e) => e.id === id)?.name || ''
-    const accepted = links.filter((l) => l.include && l.entry.trim() && (l.expertiseId || l.newExpertise?.name?.trim()))
+    const { user, expertise } = useStore.getState()
+    const domainOf = (l) => (l.expertiseId ? expertise.find((e) => e.id === l.expertiseId)?.domain : l.newExpertise?.domain)
+    const accepted = links.filter((l) => l.include && canContribute(user, domainOf(l)) && l.entry.trim() && (l.expertiseId || l.newExpertise?.name?.trim()))
       .map((l) => ({ ...l, entry: l.entry.trim() }))
     try {
       const row = await saveMeeting({
