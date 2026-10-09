@@ -69,7 +69,7 @@ Organised as **Domain → Topic → Expertise** (taxonomy in `src/data/taxonomy.
 - Open **Writing Assistant** in the sidebar, or **Summarize / draft email** on an approved Expertise page to preselect that reference.
 - Select up to 10 approved Expertise pages. Search by name or content and filter by domain.
 - **Summary** condenses the selected guidance; an optional instruction sets the focus.
-- **Email draft** takes an employee's goal, recipient/audience and tone, then produces an editable subject and message. Copy the draft into your email app.
+- **Email draft** takes an employee's goal, recipient/audience and tone, then produces an editable subject and message. **Open in Gmail** opens a Gmail compose window with the subject, message and (if it is an email address) recipient filled in, so you review and send it yourself; messages too long for a link are copied for pasting. **Copy** works with any email app.
 - Supporting references show the exact Expertise versions, owners and quoted passages. Missing details appear separately; dates and other unknowns use placeholders.
 - Live generation uses Claude Sonnet via `POST /api/writing/generate`; start the backend with `ANTHROPIC_API_KEY` configured. Restart the backend after adding this endpoint.
 - With `VITE_USE_MOCK=true`, a clearly labelled demo preview assembles source excerpts rather than claiming to generate tailored writing.

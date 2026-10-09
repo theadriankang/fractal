@@ -5,7 +5,7 @@ const server = await createServer({ server: { open: false, watch: null }, appTyp
 const originalFetch = globalThis.fetch
 try {
   const { SEED_EXPERTISE } = await server.ssrLoadModule('/src/data/expertise.js')
-  const { writingReference, validateWritingRequest, validateWritingResult, buildDemoWriting, generateWriting } = await server.ssrLoadModule('/src/lib/writingService.js')
+  const { writingReference, validateWritingRequest, validateWritingResult, buildDemoWriting, generateWriting, gmailCompose, GMAIL_URL_LIMIT } = await server.ssrLoadModule('/src/lib/writingService.js')
   const reference = SEED_EXPERTISE.find((e) => e.id === 'exp-shutdown-notice')
   const request = { mode: 'summary', instructions: '', recipient: '', sender: 'Employee', tone: 'professional', expertise: [writingReference(reference)] }
   const summary = buildDemoWriting(request)
@@ -32,6 +32,21 @@ try {
   assert(buildDemoWriting({ ...request, expertise: [{ ...emptyReference, guardrails: ['Never promise compensation.'] }] }).citations[0].excerpt.includes('compensation'))
   assert.throws(() => validateWritingResult({ ...summary, citations: [{ ...summary.citations[0], version: '99' }] }, request))
   assert.throws(() => validateWritingResult({ ...summary, citations: [{ ...summary.citations[0], excerpt: 'An invented company policy.' }] }, request))
+
+  const draft = { subject: 'Water shutdown & access', body: 'Hi team,\n\nPlumbing work: 50% done + [date].' }
+  const compose = gmailCompose({ to: ' ops@example.com ', ...draft })
+  const params = new URL(compose.url).searchParams
+  assert(compose.url.startsWith('https://mail.google.com/mail/?view=cm&fs=1&'))
+  assert(compose.includesBody)
+  assert.equal(params.get('to'), 'ops@example.com')
+  assert.equal(params.get('su'), draft.subject)
+  assert.equal(params.get('body'), draft.body)
+  assert(!compose.url.includes('+'), 'spaces and plus signs must be percent-encoded')
+  assert.equal(new URL(gmailCompose({ to: 'Tenant contact', ...draft }).url).searchParams.get('to'), null)
+  const long = gmailCompose({ to: '', subject: 'Long', body: 'x'.repeat(GMAIL_URL_LIMIT) })
+  assert(!long.includesBody && long.url.length <= GMAIL_URL_LIMIT)
+  assert.equal(new URL(long.url).searchParams.get('body'), null)
+  assert.equal(new URL(long.url).searchParams.get('su'), 'Long')
 
   const controller = new AbortController()
   globalThis.fetch = async (url, options) => {

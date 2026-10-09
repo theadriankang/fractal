@@ -44,6 +44,20 @@ export function buildDemoWriting(request) {
   return validateWritingResult(result, request)
 }
 
+// Gmail rejects very long compose URLs, so oversized bodies are left for the user to paste.
+export const GMAIL_URL_LIMIT = 8000
+const EMAIL_ADDRESS = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/
+
+export function gmailCompose({ to = '', subject, body }) {
+  const params = [['view', 'cm'], ['fs', '1']]
+  // The recipient field also accepts audiences like "Tenant contact"; only real addresses prefill To.
+  if (EMAIL_ADDRESS.test(to.trim())) params.push(['to', to.trim()])
+  params.push(['su', subject])
+  const url = (extra = []) => 'https://mail.google.com/mail/?' + [...params, ...extra].map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+  const full = url([['body', body]])
+  return full.length <= GMAIL_URL_LIMIT ? { url: full, includesBody: true } : { url: url(), includesBody: false }
+}
+
 export async function generateWriting(request, signal) {
   const payload = { ...request, expertise: request.expertise.map(writingReference) }
   validateWritingRequest(payload)

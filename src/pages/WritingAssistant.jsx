@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { BookOpenCheck, Copy, FileText, Loader2, Mail, Search, Sparkles, X } from 'lucide-react'
 import { useStore } from '../store'
 import { DOMAINS } from '../data/expertise'
-import { generateWriting, MAX_WRITING_REFERENCES, writingReference } from '../lib/writingService'
+import { generateWriting, gmailCompose, MAX_WRITING_REFERENCES, writingReference } from '../lib/writingService'
 import TopBar from '../components/TopBar'
 
 export default function WritingAssistant() {
@@ -63,6 +63,14 @@ export default function WritingAssistant() {
     try { await navigator.clipboard.writeText(text); showToast(result.mode === 'email' ? 'Email draft copied' : 'Summary copied') }
     catch { setError('Could not copy. Select the text and copy it manually.') }
   }
+  const gmail = result?.mode === 'email' ? gmailCompose({ to: recipient, ...result.email }) : null
+  const openGmail = () => {
+    if (gmail.includesBody) return showToast('Draft opened in Gmail. Review it before sending.')
+    // Start the copy before the new tab takes focus; Gmail opens with the subject only.
+    navigator.clipboard.writeText(result.email.body)
+      .then(() => showToast('Message too long for a Gmail link. It is copied — paste it into the draft.'))
+      .catch(() => setError('The message is too long to open in Gmail. Copy it and paste it into the draft.'))
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -108,7 +116,7 @@ export default function WritingAssistant() {
               </div>
             </form>
             <section className="card min-w-0 p-5 sm:p-6" aria-label="Writing result" aria-live="polite" aria-busy={busy}>
-              <div className="flex items-center justify-between gap-3"><h2 className="font-medium">{result?.mode === 'email' ? 'Your email draft' : 'Your summary'}</h2>{result && <button type="button" className="btn-outline text-xs" onClick={copy}><Copy size={14} /> Copy</button>}</div>
+              <div className="flex items-center justify-between gap-3"><h2 className="font-medium">{result?.mode === 'email' ? 'Your email draft' : 'Your summary'}</h2>{result && <div className="flex shrink-0 gap-2">{gmail && <a href={gmail.url} target="_blank" rel="noopener noreferrer" className="btn-outline text-xs" onClick={openGmail}><Mail size={14} /> Open in Gmail</a>}<button type="button" className="btn-outline text-xs" onClick={copy}><Copy size={14} /> Copy</button></div>}</div>
               {!result && <div className="flex min-h-[300px] flex-col items-center justify-center px-5 text-center text-gray-500"><FileText size={30} className="mb-4 text-gray-400" /><p className="text-sm">{busy ? 'Reading selected Expertise and preparing your result…' : 'Select company references to get started.'}</p><p className="mt-2 max-w-xs text-xs leading-relaxed">The result will include source pages and versions so you can check the supporting guidance.</p></div>}
               {result && <>
                 {result.demo && <p className="mt-4 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">Demo preview: source excerpts only. Connect Claude for a tailored summary or email draft.</p>}
