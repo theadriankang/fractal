@@ -56,7 +56,7 @@ export default function ChatPage() {
   const lastContent = chat?.messages.at(-1)?.responses?.map((r) => r.content.length).join() + (chat?.messages.at(-1)?.detectionState || '')
 
   useEffect(() => {
-    if (chatId && !chat) navigate('/chat', { replace: true })
+    if (chatId && !chat) navigate('/', { replace: true })
   }, [chatId, chat, navigate])
 
   useEffect(() => {
