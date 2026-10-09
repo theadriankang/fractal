@@ -1,5 +1,6 @@
 // Seed Expertise ("Intelligence Pills") for the Keppel AI HARVEST demo.
 // Each Expertise is a governed, versioned, reusable domain capability.
+import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './expertisePortfolio'
 
 export { TAXONOMY } from './taxonomy'
 export const DOMAINS = [
@@ -363,7 +364,7 @@ const EXTRA = [
   }),
 ]
 
-SEED_EXPERTISE.push(...EXTRA)
+SEED_EXPERTISE.push(...EXTRA, ...PORTFOLIO_EXPERTISE)
 
 // Pending revision proposals generated from feedback / corrections.
 export const SEED_PROPOSALS = [
@@ -381,4 +382,5 @@ export const SEED_PROPOSALS = [
       },
     },
   },
+  ...PORTFOLIO_PROPOSALS,
 ]

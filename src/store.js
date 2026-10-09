@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { SEED_CHATS } from './data/chats'
 import { SEED_EXPERTISE, SEED_PROPOSALS, CONTENT_FIELDS } from './data/expertise'
+import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfolio'
+import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
 import { isLive, streamChat } from './lib/api'
@@ -439,9 +441,9 @@ export const useStore = create(
     }),
     {
       name: 'fractal-store',
-      version: 2,
-      // v2 introduced the Domain → Topic taxonomy; older saved data is reset to the new seed.
-      migrate: (state, version) => (version < 2 ? {} : state),
+      version: 3,
+      // v3 adds portfolio fixtures once without overwriting existing work.
+      migrate: (state, version) => migrateDemoState(state, version, withSnapshots(PORTFOLIO_EXPERTISE), PORTFOLIO_PROPOSALS),
       partialize: (s) => ({
         chats: s.chats,
         expertise: s.expertise,

@@ -20,6 +20,24 @@ npm run build      # production build → dist/
 
 Requires Node 18+. Data persists in your browser (localStorage). **User menu → Reset demo data** restores the seed data.
 
+The demo includes **55 fictional Expertise records** across all 6 domains, 19 topics
+and 4 asset types, plus **5 revision proposals**. Reloading an existing v2 demo adds
+the 38 new portfolio records without overwriting saved edits, chats or settings.
+Reset demo data restores the complete fixture set, including the review queue.
+The added playbooks and source documents are testing fixtures, not verified site procedures.
+
+Try these scenarios to exercise the expanded library:
+
+- Search `condensate`, `loading dock`, `recycling`, or `fit-out`; combine with asset-type filters.
+- Compare `UPS Battery Health Trend Review` (in review) with `UPS Maintenance Window Planning` (draft).
+- Turn off **Live only** to find retired escalator, rent and carbon guidance and their replacement links.
+- Open an approved portfolio record to compare three versions, inspect sources and feedback, or test rollback.
+- In Review Queue, approve/reject a proposal; the waste proposal tests removal and replacement of a decision step.
+- In chat, try “Review the after-hours baseload” or “Prepare a new tenant handover checklist” for keyword retrieval.
+
+Run `npm run validate:demo` to check fixture coverage, links, governance data,
+retrieval and preservation of saved state during the demo upgrade.
+
 ---
 
 ## Features
