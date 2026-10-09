@@ -305,6 +305,11 @@ export const useStore = create(
         const chat = get().chats.find((c) => c.id === chatId)
         const msg = chat?.messages.find((m) => m.id === msgId)
         if (!msg) return
+        // No capture after a failed answer: the backend is likely down and a keyword guess would be noise.
+        if (!msg.responses.some((r) => r.content && !r.error)) {
+          get().patchMessage(chatId, msgId, (m) => ({ ...m, detection: null, detectionState: null }))
+          return
+        }
         const keyword = () => fromKeywordDetector(detectExpertise(text, chat, matched), user, get().expertise)
         const live = msg.responses.some((r) => isLive(r.modelId) && r.content && !r.error)
         let det = null

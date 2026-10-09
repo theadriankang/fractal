@@ -2,9 +2,13 @@
 
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+LOCAL_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/postgres"
 
 
 class Settings(BaseSettings):
@@ -17,7 +21,7 @@ class Settings(BaseSettings):
     )
 
     # Supabase / Postgres
-    database_url: str = "postgresql://postgres:postgres@localhost:5432/postgres"
+    database_url: str = LOCAL_DATABASE_URL
     supabase_url: str = ""
     supabase_service_role_key: str = ""
 
@@ -44,6 +48,14 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: list[str] = ["http://localhost:5173"]
+
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _blank_database_url(cls, v):
+        # `DATABASE_URL=` left empty in backend/.env must not crash startup: fall back to the
+        # local default so the app runs (health reports the database as disconnected).
+        return v if isinstance(v, str) and v.strip() else LOCAL_DATABASE_URL
 
 
 settings = Settings()
