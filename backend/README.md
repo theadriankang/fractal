@@ -30,6 +30,7 @@ Restart uvicorn after editing `.env`; `--reload` only watches Python files.
 | GET    | `/api/health` | `{status, database, claude}` — DB connectivity + whether Claude is configured |
 | GET    | `/api/models` | Models this backend serves, with availability |
 | POST   | `/api/chat/stream` | Streams one model's answer as Server-Sent Events |
+| POST   | `/api/files` | Stores one chat attachment (multipart `file`) and returns its id |
 | GET    | `/api/taxonomy` | Domain → topics taxonomy (mirrors `src/data/taxonomy.js`) |
 | GET    | `/api/expertise` | List all expertise |
 | GET    | `/api/expertise/{id}` | Single expertise with versions + feedback |
@@ -50,13 +51,28 @@ Body:
 ```json
 {
   "model": "claude-sonnet",
-  "messages": [{"role": "user", "content": "CHWST is 8.1 °C, what do I check?"}],
+  "messages": [{"role": "user", "content": "CHWST is 8.1 °C, what do I check?", "files": ["<id from /api/files>"]}],
   "expertise": [{"id": "exp-chiller-fault", "name": "...", "version": "1.3", "status": "approved", "...": "..."}]
 }
 ```
 
 Events, in order: `meta {expertise: [{id, version}]}` (the Expertise actually applied), then
 `delta {text}` repeatedly, then `done {stopReason, model}` or `error {message}`.
+
+### Attachments (`POST /api/files`)
+
+The composer uploads each file as soon as it is picked; messages keep only the returned
+`{id, name, size, kind}`. Accepted: PDF, DOCX, TXT, MD, CSV, PNG, JPG; up to 10 MB each and
+5 per message. Files are stored under `backend/uploads/<id>/` (git-ignored) with their
+extracted text, and re-read on every chat turn, so follow-up questions still see them.
+
+- **Claude** gets PDFs and images natively (it reads scanned pages and figures), and
+  DOCX/text files as text documents (first 100,000 characters). The conversation prefix is
+  prompt-cached, so files resent on later turns bill at cache-read rates.
+- **Other models** get the extracted text (first 20,000 characters per file) as
+  `<attached_file name="...">` blocks; images are noted but not shown to them yet.
+- Truncation is stated in the text the model receives. Unknown or deleted file ids become a
+  "no longer available" note instead of an error.
 
 ## Know-how capture (`POST /api/expertise/extract`)
 
@@ -113,5 +129,6 @@ Demo users:
 ## Current limitations
 
 - Expertise matching is still the front end's keyword match. Prompt 3 replaces it.
-- Attached files are not sent to Claude yet; web search is not implemented.
+- Attachments live on the backend's local disk (`backend/uploads/`), not Supabase Storage, and
+  are never deleted. Non-Claude models can't see images yet. Web search is not implemented.
 - GPT, Gemini, Grok, Hunyuan and DeepSeek are still mocked.

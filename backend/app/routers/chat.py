@@ -4,6 +4,7 @@ import anthropic
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from .. import files
 from ..llm import claude, registry
 from ..prompts import build_system_prompt
 from ..schemas import ChatStreamRequest
@@ -15,11 +16,21 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def to_claude_messages(turns) -> list[dict]:
-    """Drops empty turns and any leading assistant turns; the API needs user-first history."""
-    msgs = [{"role": t.role, "content": t.content} for t in turns if t.content.strip()]
-    while msgs and msgs[0]["role"] != "user":
-        msgs.pop(0)
+def to_model_messages(turns, native_files: bool) -> list[dict]:
+    """Drops empty turns and any leading assistant turns (the API needs user-first history),
+    then adds each user turn's attachments: content blocks for Claude, extracted text otherwise."""
+    kept = [t for t in turns if t.content.strip()]
+    while kept and kept[0].role != "user":
+        kept.pop(0)
+    msgs = []
+    for t in kept:
+        content = t.content
+        if t.role == "user" and t.files:
+            if native_files:
+                content = [*files.claude_blocks(t.files), {"type": "text", "text": t.content}]
+            else:
+                content = f"{files.text_attachments(t.files)}\n\n{t.content}"
+        msgs.append({"role": t.role, "content": content})
     return msgs
 
 
@@ -47,7 +58,7 @@ async def chat_stream(req: ChatStreamRequest):
     if not registry.is_available(entry):
         raise HTTPException(400, f"Model '{req.model}' is not available (no API key configured).")
 
-    messages = to_claude_messages(req.messages)
+    messages = to_model_messages(req.messages, native_files=entry.provider == "anthropic")
     if not messages or messages[-1]["role"] != "user":
         raise HTTPException(400, "The conversation must end with a user message.")
 
