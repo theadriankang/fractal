@@ -118,6 +118,18 @@ export function useMeetingRecorder() {
     setBlocks(text.split(/\n{2,}/).filter((p) => p.trim()).map((p) => ({ id: uid(), text: p.trim(), at: null })))
   }, [])
 
+  // reopen a saved meeting (from the Recent meetings list) for reading / editing
+  const load = useCallback((row) => {
+    setMeeting(row)
+    meetingPromise.current = Promise.resolve(row)
+    setTitle(row.title)
+    setElapsed(row.duration || 0)
+    setEditingId(null)
+    setBlocks((row.transcript_text || '').split(/\n{2,}/).filter((p) => p.trim()).map((p) => ({ id: uid(), text: p.trim(), at: null })))
+    setStatus('done')
+    setSave({ state: 'saved', at: null, error: null })
+  }, [])
+
   const reset = useCallback(() => {
     setStatus('idle'); setBlocks([]); setTitle(''); setElapsed(0); setMeeting(null); setEditingId(null)
     setSave({ state: 'idle', at: null, error: null })
@@ -130,7 +142,7 @@ export function useMeetingRecorder() {
     supported: speech.supported,
     analyser: mic.analyser,
     meeting, save,
-    start, stop, reset, updateBlock, replaceTranscript,
+    start, stop, reset, load, updateBlock, replaceTranscript,
   }
 }
 

@@ -1,17 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Mic, Square, Pencil, Check, CloudOff, Cloud, Loader2, RotateCcw, Lock, Copy, Sparkles } from 'lucide-react'
+import { Mic, Square, Pencil, Check, CloudOff, Cloud, Loader2, RotateCcw, Lock, Copy, Sparkles, History, Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import { useMeetingRecorder, joinBlocks } from '../hooks/useMeetingRecorder'
 import { hasSupabase } from '../lib/supabase'
+import { listMeetings, deleteMeeting } from '../lib/meetingsService'
 import { streamText } from '../lib/mockApi'
 import { Logo } from '../components/ui'
 import TopBar from '../components/TopBar'
 import Composer from '../components/Composer'
 
 const fmt = (s) => [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((n) => String(n).padStart(2, '0')).join(':')
-const panel = 'rounded-2xl border border-gray-200 bg-white dark:border-[#2A2A2A] dark:bg-[#181818]'
+const panel = 'rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-850'
 
 // ---------------------------------------------------------------- waveform
 function Waveform({ analyser, active }) {
@@ -91,7 +92,7 @@ function Block({ block, editing, onEdit, onSave, onCancel }) {
 
   if (editing)
     return (
-      <div className="rounded-xl bg-gray-50 p-2 ring-1 ring-accent-500/50 dark:bg-[#121212]">
+      <div className="rounded-xl bg-gray-50 p-2 ring-1 ring-accent-500/50 dark:bg-gray-900">
         <textarea
           ref={ta}
           autoFocus
@@ -136,7 +137,7 @@ function Transcript({ rec }) {
   const empty = !rec.blocks.length && !rec.interim
   return (
     <div className={`${panel} flex min-h-0 flex-col`}>
-      <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 dark:border-[#2A2A2A]">
+      <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 dark:border-gray-800">
         <p className="flex items-center gap-2 text-sm font-medium">
           Live Transcript
           {recording && <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-400">Live</span>}
@@ -182,14 +183,15 @@ function summarise(blocks) {
   const key = blocks.map((b) => b.text.split(/(?<=[.!?])\s+/)[0]).filter(Boolean).slice(0, 6)
   const actions = sentences.filter((s) => ACTION.test(s)).slice(0, 8)
   const words = blocks.reduce((n, b) => n + b.text.split(/\s+/).length, 0)
+  // blank lines between blocks so Markdown keeps headings, meta line and lists separate
   return [
     `### Meeting summary`,
     `*${blocks.length} paragraphs · ~${words} words*`,
     `**Key points**`,
-    ...key.map((k) => `- ${k}`),
+    key.map((k) => `- ${k}`).join('\n'),
     `**Action items**`,
-    ...(actions.length ? actions.map((a) => `- [ ] ${a}`) : ['- _No explicit action items detected._']),
-  ].join('\n')
+    (actions.length ? actions.map((a) => `- [ ] ${a}`) : ['- _No explicit action items detected._']).join('\n'),
+  ].join('\n\n')
 }
 
 function runCommand(text, rec) {
@@ -241,7 +243,7 @@ function MeetingChat({ rec }) {
         <div className="space-y-5">
           {turns.map((t) => (
             <div key={t.id} className="space-y-3 animate-fadeIn">
-              <div className="ml-auto w-fit max-w-[80%] rounded-3xl bg-gray-100 px-4 py-2 text-[15px] dark:bg-[#2A2A2A]">{t.q}</div>
+              <div className="ml-auto w-fit max-w-[80%] rounded-3xl bg-gray-100 px-4 py-2 text-[15px] dark:bg-gray-850">{t.q}</div>
               <div className="flex gap-3">
                 <span className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-accent-400 to-indigo-500 text-white"><Sparkles size={13} /></span>
                 <div className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{t.a}</ReactMarkdown></div>
@@ -252,20 +254,24 @@ function MeetingChat({ rec }) {
         </div>
       )}
       <ChatDock>
-        <Composer onSend={onSend} streaming={streaming} onStop={() => cancel.current?.()} autoFocus={false} />
+        <Composer
+          onSend={onSend} streaming={streaming} onStop={() => cancel.current?.()} autoFocus={false}
+          showRouting={false} allowExpertise={false}
+          placeholder='Ask about this meeting — e.g. "Summarise the meeting" or "Replace Kepel with Keppel"'
+        />
       </ChatDock>
     </>
   )
 }
 
 const ChatDock = ({ children }) => (
-  <div className="sticky bottom-0 -mx-4 bg-gradient-to-t from-white via-white to-transparent px-4 pb-3 pt-6 dark:from-[#121212] dark:via-[#121212]">{children}</div>
+  <div className="sticky bottom-0 -mx-4 bg-gradient-to-t from-white via-white to-transparent px-4 pb-3 pt-6 dark:from-gray-900 dark:via-gray-900">{children}</div>
 )
 
 function LockedComposer() {
   return (
     <ChatDock>
-      <div className="mx-auto flex w-full max-w-3xl items-center gap-3 rounded-3xl border border-dashed border-gray-300 px-5 py-4 text-sm text-gray-500 dark:border-[#2A2A2A] dark:bg-[#181818]">
+      <div className="mx-auto flex w-full max-w-3xl items-center gap-3 rounded-3xl border border-dashed border-gray-300 px-5 py-4 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-850">
         <Lock size={16} /> Chat unlocks when the recording ends — then ask me to summarise or edit the transcript.
       </div>
     </ChatDock>
@@ -284,6 +290,44 @@ function SaveBadge({ save }) {
   return <span className="mr-1 flex items-center gap-1.5 text-xs text-gray-500" title={save.error || ''}>{v[0]} {v[1]}</span>
 }
 
+
+// ---------------------------------------------------------------- recent meetings
+function RecentMeetings({ rec }) {
+  const [rows, setRows] = useState(null)
+  const [err, setErr] = useState(null)
+  const refresh = () => listMeetings(10).then(setRows).catch((e) => setErr(e.message))
+  // reload whenever a recording finishes or the user returns to idle
+  useEffect(() => { if (rec.status !== 'recording') refresh() }, [rec.status, rec.meeting?.id]) // eslint-disable-line
+  if (rec.status === 'recording') return null
+  const list = (rows || []).filter((r) => r.id !== rec.meeting?.id && (r.transcript_text || '').trim())
+  if (!list.length && !err) return null
+  return (
+    <div className={`${panel} px-5 py-4`}>
+      <p className="mb-2 flex items-center gap-2 text-sm font-medium"><History size={15} className="text-gray-500" /> Recent meetings</p>
+      {err && <p className="text-sm text-red-400">Couldn't load meetings: {err}</p>}
+      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+        {list.map((m) => (
+          <div key={m.id} className="group flex items-center gap-3 py-2">
+            <button className="min-w-0 flex-1 text-left" onClick={() => rec.load(m)}>
+              <span className="block truncate text-sm font-medium group-hover:text-accent-500">{m.title}</span>
+              <span className="block truncate text-xs text-gray-500">
+                {new Date(m.created_at).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {fmt(m.duration || 0)} · {m.transcript_text.slice(0, 80)}
+              </span>
+            </button>
+            <button
+              className="icon-btn opacity-0 group-hover:opacity-100"
+              title="Delete meeting"
+              onClick={async () => { await deleteMeeting(m.id); refresh() }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- page
 export default function MeetingRecorder() {
   const user = useStore((s) => s.user)
@@ -299,7 +343,7 @@ export default function MeetingRecorder() {
   }, [recording])
 
   return (
-    <div className="flex h-full flex-col dark:bg-[#121212]">
+    <div className="flex h-full flex-col">
       <TopBar
         right={
           <>
@@ -314,7 +358,7 @@ export default function MeetingRecorder() {
           <input
             value={rec.title}
             onChange={(e) => rec.setTitle(e.target.value)}
-            className="w-full max-w-sm rounded-lg bg-transparent px-2 py-1 text-sm font-medium outline-none hover:bg-gray-100 focus:bg-gray-100 dark:hover:bg-[#181818] dark:focus:bg-[#181818]"
+            className="w-full max-w-sm rounded-lg bg-transparent px-2 py-1 text-sm font-medium outline-none hover:bg-gray-100 focus:bg-gray-100 dark:hover:bg-gray-850 dark:focus:bg-gray-850"
             aria-label="Meeting title"
           />
         ) : (
@@ -326,11 +370,12 @@ export default function MeetingRecorder() {
         <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-5 px-4 pt-6">
           <div className="flex items-center justify-center gap-3 animate-fadeIn">
             <Logo size={34} />
-            <h1 className="text-2xl font-medium tracking-tight sm:text-3xl">Ready to record your meeting? {user.name.split(' ')[0]}</h1>
+            <h1 className="text-2xl font-medium tracking-tight sm:text-3xl">Ready to record your meeting, {user.name.split(' ')[0]}?</h1>
           </div>
 
           <RecordControl rec={rec} />
           <Transcript rec={rec} />
+          <RecentMeetings rec={rec} />
 
           <div className="mt-auto">
             {rec.status === 'done' ? <MeetingChat rec={rec} /> : <LockedComposer />}
