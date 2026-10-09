@@ -31,7 +31,7 @@ function Shell() {
       </div>
       <main className="min-w-0 flex-1">
         <Routes>
-          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/" element={<ChatPage />} />
           <Route path="/c/:chatId" element={<ChatPage />} />
           <Route path="/expertise" element={<ExpertiseLayout />}>
             <Route index element={<ExpertiseHome />} />
@@ -40,7 +40,7 @@ function Shell() {
             <Route path=":id" element={<ExpertiseDetail />} />
           </Route>
           <Route path="/meetings" element={<MeetingRecorder />} />
-          <Route path="*" element={<Navigate to="/chat" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
       <SettingsModal />
@@ -65,8 +65,7 @@ export default function App() {
   return (
     <>
       <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/welcome" element={<Navigate to="/" replace />} />
+        <Route path="/welcome" element={<Landing />} />
         <Route path="/*" element={<Shell />} />
       </Routes>
       <Toast />
