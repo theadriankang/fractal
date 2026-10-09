@@ -23,11 +23,6 @@ def to_claude_messages(turns) -> list[dict]:
     return msgs
 
 
-@router.get("/health")
-def health():
-    return {"ok": True, "claude": claude.is_configured()}
-
-
 @router.get("/models")
 def models():
     """Models this backend can answer for. Everything else stays on the front-end mock for now."""

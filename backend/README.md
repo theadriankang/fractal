@@ -1,31 +1,50 @@
-# Fractal backend
+# Fractal Backend (FastAPI)
 
-FastAPI service the chat UI talks to. So far it answers for the three Claude models
-(`claude-opus`, `claude-sonnet`, `claude-haiku`). Every other model, and the whole UI when
-`VITE_USE_MOCK=true`, still uses the front-end mock in `src/lib/mockApi.js`.
+AI service for the Fractal platform. Talks to Supabase Postgres via `DATABASE_URL`
+and answers chat for the three Claude models (`claude-opus`, `claude-sonnet`,
+`claude-haiku`). Every other model, and the whole UI when `VITE_USE_MOCK=true`,
+still uses the front-end mock in `src/lib/mockApi.js`.
 
-## Run it
+## Setup
 
 ```bash
 cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env          # then put your key in ANTHROPIC_API_KEY
+cp .env.example .env   # fill in DATABASE_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY
+```
+
+## Run (dev)
+
+```bash
 .venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
-Then run the front end as usual (`npm run dev` in the repo root). Vite proxies `/api` to port 8000.
+The API is served at `http://localhost:8000/api/*`. Vite proxies `/api` to port 8000.
 Restart uvicorn after editing `.env`; `--reload` only watches Python files.
 
 ## Endpoints
 
-| Method | Path | What it does |
-|---|---|---|
-| GET | `/api/health` | `{ok, claude}`; `claude` is true when a key is configured |
-| GET | `/api/models` | Models this backend serves, with availability |
-| POST | `/api/chat/stream` | Streams one model's answer as Server-Sent Events |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET    | `/api/health` | `{status, database, claude}` — DB connectivity + whether Claude is configured |
+| GET    | `/api/models` | Models this backend serves, with availability |
+| POST   | `/api/chat/stream` | Streams one model's answer as Server-Sent Events |
+| GET    | `/api/taxonomy` | Domain → topics taxonomy (mirrors `src/data/taxonomy.js`) |
+| GET    | `/api/expertise` | List all expertise |
+| GET    | `/api/expertise/{id}` | Single expertise with versions + feedback |
+| POST   | `/api/expertise` | Create expertise |
+| PATCH  | `/api/expertise/{id}` | Update expertise |
+| GET    | `/api/proposals` | List proposals |
+| GET    | `/api/chats` | List chats for the current user (with messages + responses) |
+| POST   | `/api/chats` | Create a chat |
+| GET    | `/api/chats/{id}` | Get a single chat |
+| PATCH  | `/api/chats/{id}` | Update chat title / folder / pinned |
+| DELETE | `/api/chats/{id}` | Delete a chat |
 
-`POST /api/chat/stream` body:
+### `POST /api/chat/stream`
+
+Body:
 
 ```json
 {
@@ -38,6 +57,11 @@ Restart uvicorn after editing `.env`; `--reload` only watches Python files.
 Events, in order: `meta {expertise: [{id, version}]}` (the Expertise actually applied), then
 `delta {text}` repeatedly, then `done {stopReason, model}` or `error {message}`.
 
+## Auth (stub)
+
+All chats/expertise endpoints read the `X-User-Id` header (a Supabase user UUID) and look up
+the matching `profiles` row. Prompt 8 replaces this with full Supabase JWT verification.
+
 ## How answers are built
 
 - **Model ids.** `app/llm/claude.py` maps the front-end ids to `claude-opus-5-5`, `claude-sonnet-5-5`
@@ -49,11 +73,16 @@ Events, in order: `meta {expertise: [{id, version}]}` (the Expertise actually ap
   (`fallbacks: "default"`), so a safety-classifier decline is retried on a fallback model
   automatically. If the whole chain declines, the UI shows an error.
 
-## Not done yet
+## Seed
 
-- The backend is stateless: the browser sends the conversation history (last 20 turns) and the
-  matched Expertise with each request. Chats and Expertise still live in browser storage.
-  Prompt 1 in `docs/BUILD_PROMPTS.md` (database) moves them server-side.
-- Expertise matching is still the front end's keyword match. Prompt 3 replaces it.
-- Attached files and the web-search toggle are not sent to Claude yet.
-- GPT, Gemini, Grok, Hunyuan and DeepSeek are still mocked.
+```bash
+# From the repo root — generate seed_data.json from the front-end mock data
+node scripts/export-seed.mjs
+
+# From backend/ — load it into Supabase + create demo users
+python seed.py
+```
+
+Demo users:
+- `adrian@fractal.demo` (reviewer) — password `demo1234`
+- `priya@fractal.demo` (contributor) — password `demo1234`

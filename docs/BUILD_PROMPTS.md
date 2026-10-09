@@ -3,7 +3,7 @@
 Paste these into **CodeBuddy** one at a time, in order. Each has a **✅ Done when** check — don't move on until it passes.
 
 > **Hackathon proof:** screenshot each CodeBuddy session (prompt + its reply + the diff). You need **≥ 3** for submission; aim for one per prompt.
-> Commit after every prompt: `git add -A && git commit -m "<what changed>" && git push`.
+> After each prompt: commit on a feature branch with a descriptive message (see rule 10 in PROJECT_CONTEXT.md, e.g. `feat(chat): stream replies from GPT and Gemini`), push, open a PR, merge. The "Prompt N" numbers are only for this checklist — never use them in branch names or commits.
 
 ---
 

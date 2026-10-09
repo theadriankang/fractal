@@ -7,6 +7,12 @@ dist
 !.env.example
 *.swp
 
-# Backend
+supabase/.temp/
+
+# Python / Backend
+.venv/
 backend/.venv
+venv/
 __pycache__/
+*.pyc
+backend/seed_data.json

@@ -86,4 +86,8 @@ Assistant msg: `{id, role:'assistant', createdAt, responses:[{modelId, auto:{cat
 7. Keep a **mock fallback**: front end must still run with `VITE_USE_MOCK=true` (demo safety if APIs fail on stage).
 8. Small commits with clear messages after each prompt.
 9. **Do not rewrite the Meeting Recorder** (its page, hooks, `meetingsService.js` or the `meetings` Edge Function) unless a prompt says so. It already uses Supabase — integrate with it, don't replace it.
-10. Work on a branch per prompt (e.g. `backend/prompt-1`), open a pull request, merge into `main` when the ✅ check passes.
+10. **Branches & commits (version history must read cleanly):**
+   - Branch names describe the feature: `feature/<thing>`, `fix/<thing>`, `docs/<thing>` (e.g. `feature/multi-model-chat`). Never `prompt-N`.
+   - Commit messages use `type(scope): what changed`, lowercase, imperative, ≤ 72 chars, e.g. `feat(chat): stream replies from GPT and Gemini`, `fix(seed): handle existing demo users`, `docs: add architecture diagram`. Types: feat, fix, refactor, docs, test, chore, merge.
+   - Add a short body (what + why) for anything non-trivial. Never mention "Prompt N" in commits or PR titles.
+   - Open a pull request, merge into `main` when the ✅ check passes.
