@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
 import {
   PanelLeftClose, SquarePen, Search, BookOpenCheck, MoreHorizontal, Pin, PinOff, Pencil, Trash2,
-  Settings, RotateCcw, ShieldCheck, UserRound, Folder, ChevronDown, ChevronRight,
+  Settings, RotateCcw, ShieldCheck, UserRound, Folder, ChevronDown, ChevronRight, Mic,
 } from 'lucide-react'
 import { useStore, reviewCount } from '../store'
 import { Logo, Dropdown } from './ui'
@@ -135,6 +135,10 @@ export default function Sidebar() {
               {pending}
             </span>
           )}
+        </NavLink>
+        <NavLink to="/meetings" className={navCls}>
+          <Mic size={17} />
+          <span className="flex-1">Meeting Recorder</span>
         </NavLink>
       </div>
 

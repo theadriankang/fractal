@@ -8,6 +8,7 @@ import ExpertiseLayout from './pages/ExpertiseLayout'
 import ExpertiseHome, { ExpertiseDomain } from './pages/ExpertiseHome'
 import ExpertiseDetail from './pages/ExpertiseDetail'
 import ReviewQueue from './pages/ReviewQueue'
+import MeetingRecorder from './pages/MeetingRecorder'
 import Landing from './pages/Landing'
 
 function Toast() {
@@ -38,6 +39,7 @@ function Shell() {
             <Route path="d/:slug" element={<ExpertiseDomain />} />
             <Route path=":id" element={<ExpertiseDetail />} />
           </Route>
+          <Route path="/meetings" element={<MeetingRecorder />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
