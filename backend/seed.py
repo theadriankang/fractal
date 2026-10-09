@@ -95,8 +95,9 @@ def _find_user_by_email(sb, email: str):
     return None
 
 
-def upsert_user(sb, email: str, password: str, name: str, role: str) -> str | None:
+def upsert_user(sb, email: str, password: str, name: str, role: str, domains: list[str] | None = None) -> str | None:
     """Create or update a demo user via Supabase Admin API. Returns user id."""
+    domains = domains or []
     if not sb:
         print(f"  [skip] No Supabase client — cannot create {email}")
         return None
@@ -128,15 +129,17 @@ def upsert_user(sb, email: str, password: str, name: str, role: str) -> str | No
                 print(f"  [error] Could not create {email}: {e}")
                 return None
 
-    # Upsert profile
+    # Upsert profile (including email + domains)
     db = SessionLocal()
     try:
         p = db.get(Profile, uid)
         if p:
             p.name = name
+            p.email = email
             p.role = role
+            p.domains = domains
         else:
-            p = Profile(id=uid, name=name, role=role)
+            p = Profile(id=uid, name=name, email=email, role=role, domains=domains)
             db.add(p)
         db.commit()
     finally:
@@ -270,13 +273,24 @@ def main():
 
     print("=== Seeding Supabase ===")
 
-    # Create demo users
+    # Create demo users — all 8 from src/data/users.js
     print("\n[1/3] Creating demo users...")
     sb = get_supabase_client()
-    adrian_id = upsert_user(sb, "adrian@fractal.demo", "demo1234", "Adrian Kang", "reviewer")
-    priya_id = upsert_user(sb, "priya@fractal.demo", "demo1234", "Priya S.", "contributor")
+    demo_users = [
+        ("adrian@fractal.demo", "Adrian Kang", "reviewer", []),
+        ("hafiz@fractal.demo", "Hafiz Rahman", "contributor", ["Technical Services"]),
+        ("priya@fractal.demo", "Priya S.", "contributor", ["Technical Services"]),
+        ("nurul@fractal.demo", "Nurul Huda", "contributor", ["Energy Optimisation", "Sustainability"]),
+        ("daniel@fractal.demo", "Daniel Koh", "contributor", ["Asset Operations"]),
+        ("jasmine@fractal.demo", "Jasmine Ong", "contributor", ["Tenant Experience"]),
+        ("marcus@fractal.demo", "Marcus Teo", "contributor", ["Leasing"]),
+        ("intern@fractal.demo", "Ethan Lim", "intern", []),
+    ]
+    user_ids: dict[str, str | None] = {}
+    for email, name, role, domains in demo_users:
+        user_ids[email] = upsert_user(sb, email, "demo1234", name, role, domains)
 
-    default_user = adrian_id or "00000000-0000-0000-0000-000000000000"
+    default_user = user_ids.get("adrian@fractal.demo") or "00000000-0000-0000-0000-000000000000"
 
     db = SessionLocal()
     try:
@@ -293,7 +307,7 @@ def main():
         db.close()
 
     print("\n=== Seed complete ===")
-    print(f"  Demo users: adrian@fractal.demo (reviewer), priya@fractal.demo (contributor)")
+    print(f"  Demo users: {len(demo_users)} accounts created (see src/data/users.js)")
     print(f"  Password: demo1234")
 
 
