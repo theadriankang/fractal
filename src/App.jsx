@@ -9,6 +9,7 @@ import ExpertiseHome, { ExpertiseDomain } from './pages/ExpertiseHome'
 import ExpertiseDetail from './pages/ExpertiseDetail'
 import ReviewQueue from './pages/ReviewQueue'
 import MeetingRecorder from './pages/MeetingRecorder'
+import Landing from './pages/Landing'
 
 function Toast() {
   const toast = useStore((s) => s.toast)
@@ -20,8 +21,35 @@ function Toast() {
   )
 }
 
+function Shell() {
+  const { sidebarOpen } = useStore()
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      <div className={`transition-[width] duration-200 ${sidebarOpen ? 'w-[260px]' : 'w-0'} overflow-hidden`}>
+        <Sidebar />
+      </div>
+      <main className="min-w-0 flex-1">
+        <Routes>
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/c/:chatId" element={<ChatPage />} />
+          <Route path="/expertise" element={<ExpertiseLayout />}>
+            <Route index element={<ExpertiseHome />} />
+            <Route path="review" element={<ReviewQueue />} />
+            <Route path="d/:slug" element={<ExpertiseDomain />} />
+            <Route path=":id" element={<ExpertiseDetail />} />
+          </Route>
+          <Route path="/meetings" element={<MeetingRecorder />} />
+          <Route path="*" element={<Navigate to="/chat" replace />} />
+        </Routes>
+      </main>
+      <SettingsModal />
+    </div>
+  )
+}
+
 export default function App() {
-  const { sidebarOpen, settings } = useStore()
+  const { settings } = useStore()
 
   useEffect(() => {
     const apply = () => {
@@ -35,26 +63,13 @@ export default function App() {
   }, [settings.theme])
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <div className={`transition-[width] duration-200 ${sidebarOpen ? 'w-[260px]' : 'w-0'} overflow-hidden`}>
-        <Sidebar />
-      </div>
-      <main className="min-w-0 flex-1">
-        <Routes>
-          <Route path="/" element={<ChatPage />} />
-          <Route path="/c/:chatId" element={<ChatPage />} />
-          <Route path="/expertise" element={<ExpertiseLayout />}>
-            <Route index element={<ExpertiseHome />} />
-            <Route path="review" element={<ReviewQueue />} />
-            <Route path="d/:slug" element={<ExpertiseDomain />} />
-            <Route path=":id" element={<ExpertiseDetail />} />
-          </Route>
-          <Route path="/meetings" element={<MeetingRecorder />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-      <SettingsModal />
+    <>
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/welcome" element={<Navigate to="/" replace />} />
+        <Route path="/*" element={<Shell />} />
+      </Routes>
       <Toast />
-    </div>
+    </>
   )
 }
