@@ -83,6 +83,8 @@ class ChatOut(CamelModel):
     title: str
     folder: Optional[str] = None
     pinned: bool = False
+    owner_id: Optional[str] = None
+    owner_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     messages: list[MessageOut] = Field(default_factory=list)

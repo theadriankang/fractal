@@ -11,13 +11,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..auth import get_current_user
 from ..db import get_db
-from ..models import Chat, Message, Response, Profile
+from ..models import Chat, Message, Response, Profile, Expertise, Proposal
 from ..schemas import ChatCreate, ChatOut, ChatPatch, MessageCreate, MessageOut, ResponseOut
+from ..governance import audit
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
 
 
-def _chat_to_out(chat: Chat) -> ChatOut:
+def _chat_to_out(chat: Chat, *, owner_id: str | None = None, owner_name: str | None = None) -> ChatOut:
     """Serialise a Chat ORM object to the front-end shape."""
     messages = []
     for m in chat.messages:
@@ -53,6 +54,8 @@ def _chat_to_out(chat: Chat) -> ChatOut:
         title=chat.title,
         folder=chat.folder,
         pinned=chat.pinned,
+        owner_id=owner_id or chat.user_id,
+        owner_name=owner_name,
         created_at=chat.created_at,
         updated_at=chat.updated_at,
         messages=messages,
@@ -167,6 +170,32 @@ def upsert_message(
 
 # --- single chat get / patch / delete ---------------------------------------
 
+def _source_chat_domains(db: Session, chat_id: str) -> set[str]:
+    """Domains where this chat is the source of an Expertise or open proposal.
+
+    Checked: Expertise.sources (chatId), Proposal.chat_id, and
+    Proposal.sources (chatId). Meetings are out of scope.
+    """
+    domains: set[str] = set()
+    # Expertise whose sources reference this chat.
+    for e in db.query(Expertise).all():
+        for src in e.sources or []:
+            if src.get("chatId") == chat_id or src.get("chat_id") == chat_id:
+                domains.add(e.domain)
+    # Proposals linked to this chat (direct chat_id or via sources).
+    for p in db.query(Proposal).filter(Proposal.chat_id == chat_id).all():
+        e = db.get(Expertise, p.expertise_id)
+        if e:
+            domains.add(e.domain)
+    for p in db.query(Proposal).all():
+        for src in p.sources or []:
+            if src.get("chatId") == chat_id or src.get("chat_id") == chat_id:
+                e = db.get(Expertise, p.expertise_id)
+                if e:
+                    domains.add(e.domain)
+    return domains
+
+
 @router.get("/{chat_id}", response_model=ChatOut)
 def get_chat(
     chat_id: str,
@@ -175,13 +204,40 @@ def get_chat(
 ):
     chat = (
         db.query(Chat)
-        .filter(Chat.id == chat_id, Chat.user_id == user.id)
+        .filter(Chat.id == chat_id)
         .options(selectinload(Chat.messages).selectinload(Message.responses))
         .first()
     )
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-    return _chat_to_out(chat)
+
+    is_owner = chat.user_id == user.id
+
+    if not is_owner:
+        # Interns never see other people's chats.
+        if user.role == "intern":
+            raise HTTPException(status_code=404, detail="Chat not found")
+        # Reviewers can see any chat (it's the source of a review item).
+        if user.role == "reviewer":
+            pass
+        # Domain experts can see it only when it's the source of an Expertise
+        # or proposal in one of their domains.
+        elif user.role == "contributor":
+            domains = _source_chat_domains(db, chat_id)
+            if not (domains & set(user.domains or [])):
+                raise HTTPException(status_code=404, detail="Chat not found")
+        else:
+            raise HTTPException(status_code=404, detail="Chat not found")
+
+        # Audit: a non-owner opened someone else's conversation.
+        owner = db.get(Profile, chat.user_id)
+        owner_name = owner.name if owner else None
+        audit(db, user, "chat.view_source", "chat", chat_id,
+              owner_id=chat.user_id, owner_name=owner_name)
+        db.commit()
+        return _chat_to_out(chat, owner_id=chat.user_id, owner_name=owner_name)
+
+    return _chat_to_out(chat, owner_id=user.id, owner_name=user.name)
 
 
 @router.patch("/{chat_id}", response_model=ChatOut)
