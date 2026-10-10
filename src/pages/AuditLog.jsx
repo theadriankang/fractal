@@ -65,7 +65,9 @@ const ACTION_OPTIONS = [
 function groupByDay(entries) {
   const groups = {}
   for (const e of entries) {
-    const day = e.at.slice(0, 10)
+    // Group by the viewer's local calendar day, not the UTC date in the timestamp.
+    const d = new Date(e.at)
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     if (!groups[day]) groups[day] = []
     groups[day].push(e)
   }

@@ -347,3 +347,12 @@ def test_live_expertise_body_changes_only_through_a_proposal(db):
     r = client.patch("/api/expertise/exp-chiller", json={"keywords": ["chiller", "chw"], "knowledge": READY["knowledge"]},
                      headers=as_(HAFIZ))
     assert r.status_code == 200 and r.json()["keywords"] == ["chiller", "chw"]
+
+
+def test_repeat_views_of_a_source_chat_are_logged_once(db):
+    from app.models import Chat
+    db.add(Chat(id="chat-src", user_id=HAFIZ, title="Strainer tip"))
+    db.commit()
+    for _ in range(3):
+        assert client.get("/api/chats/chat-src", headers=as_(ADRIAN)).status_code == 200
+    assert db.query(AuditLog).filter_by(action="chat.view_source", target_id="chat-src").count() == 1
