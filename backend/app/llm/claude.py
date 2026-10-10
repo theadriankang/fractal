@@ -28,7 +28,7 @@ async def stream_reply(model_key: str, system: str, messages: list[dict]) -> Asy
     spec = MODELS[model_key]
     params: dict = {
         "model": spec["model"],
-        "max_tokens": 64000,
+        "max_tokens": settings.claude_max_output_tokens,
         "system": system,
         "messages": messages,
         "output_config": {"effort": settings.claude_effort},
