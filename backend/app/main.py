@@ -4,10 +4,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
+from .guard import DemoGuard
 from .routers import audit, capture, chat, chats, expertise, files, proposals, health, responses
 
 app = FastAPI(title="Fractal backend", version="0.1.0")
 
+app.add_middleware(DemoGuard)
+# CORS is added last so it wraps the guard: preflights and 401/429 replies keep their CORS headers.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

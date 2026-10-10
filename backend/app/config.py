@@ -51,9 +51,20 @@ class Settings(BaseSettings):
     embedding_model: str = ""  # for litellm, e.g. "text-embedding-3-small"
     retrieval_min_score: float = 0.35
 
-    # CORS
+    # CORS (env: CORS_ORIGINS='["https://fractal.vercel.app"]' or a comma-separated list)
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Public demo protection (backend/app/guard.py). Empty / 0 = off.
+    access_code: str = ""
+    rate_limit_per_minute: int = 0
+
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, v):
+        if isinstance(v, str) and not v.strip().startswith("["):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
 
     @field_validator("database_url", mode="before")
     @classmethod

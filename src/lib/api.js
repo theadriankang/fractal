@@ -6,6 +6,29 @@
 
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
+// Where the backend lives. Empty in development (Vite proxies /api to localhost:8000);
+// set VITE_API_BASE to the deployed backend's URL in production.
+export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+
+// Shared demo access code (backend/app/guard.py), entered once on the access screen.
+const ACCESS_KEY = 'fractal-access-code'
+export function getAccessCode() { try { return localStorage.getItem(ACCESS_KEY) || '' } catch { return '' } }
+export function setAccessCode(code) { try { localStorage.setItem(ACCESS_KEY, code) } catch { /* private mode */ } }
+
+/** fetch() for backend paths: adds the base URL and the access code header. */
+export function apiFetch(path, opts = {}) {
+  const code = getAccessCode()
+  const headers = { ...(opts.headers || {}), ...(code ? { 'X-Access-Code': code } : {}) }
+  return fetch(`${API_BASE}${path}`, { ...opts, headers })
+}
+
+/** Asks the backend whether an access code is required and whether the stored one works. */
+export async function checkAccess(code = getAccessCode()) {
+  const res = await fetch(`${API_BASE}/api/access/check`, { headers: code ? { 'X-Access-Code': code } : {} })
+  if (!res.ok) throw new Error(`Backend error (${res.status})`)
+  return res.json()
+}
+
 // Filled from GET /api/models on first load. Unavailable models keep the
 // existing mock fallback so the front end always works, even with no keys.
 let _liveModels = new Set()
@@ -19,7 +42,7 @@ const _RETRY_MS = 10_000
 async function refreshLiveModels() {
   if (_fetched) return
   try {
-    const res = await fetch('/api/models')
+    const res = await apiFetch('/api/models')
     if (res.ok) {
       const list = await res.json()
       _modelAvailability = Object.fromEntries(list.map((m) => [m.id, m]))
@@ -77,7 +100,7 @@ export async function extractKnowhow(body, { timeoutMs = 20000 } = {}) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    const res = await fetch('/api/expertise/extract', {
+    const res = await apiFetch('/api/expertise/extract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -111,7 +134,7 @@ export async function uploadFile(file) {
   body.append('file', file)
   let res
   try {
-    res = await fetch('/api/files', { method: 'POST', body })
+    res = await apiFetch('/api/files', { method: 'POST', body })
   } catch {
     throw new Error('Backend offline')
   }
@@ -127,7 +150,7 @@ export async function uploadFile(file) {
 export async function matchExpertiseBackend(query, attachedIds = [], limit = 3) {
   if (USE_MOCK) return null
   try {
-    const res = await fetch('/api/expertise/match', {
+    const res = await apiFetch('/api/expertise/match', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, attachedIds, limit }),
@@ -161,7 +184,7 @@ export function streamChat({ model, messages, expertise = [], routing }, { onMet
     }
 
     try {
-      const res = await fetch('/api/chat/stream', {
+      const res = await apiFetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model, messages, expertise: expertise.map(pickExpertise), routing }),
@@ -218,7 +241,7 @@ export class ApiError extends Error {
 async function request(user, method, path, body) {
   let res
   try {
-    res = await fetch(`/api${path}`, {
+    res = await apiFetch(`/api${path}`, {
       method,
       headers: { 'Content-Type': 'application/json', ...(user?.email ? { 'X-User-Email': user.email } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
