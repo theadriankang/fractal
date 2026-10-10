@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, Link, useLocation } from 'react-router-dom'
 import { BookOpenCheck, ArrowRight, Eye } from 'lucide-react'
 import { useStore, chatOwner } from '../store'
 import { userById } from '../data/users'
-import { canOpenQueue } from '../lib/permissions'
+import { canOpenQueue, isReviewer, isContributor } from '../lib/permissions'
+import { apiFor, fromApiChat, ApiError, USE_MOCK } from '../lib/api'
 import { SUGGESTIONS } from '../data/chats'
 import ModelSelector from '../components/ModelSelector'
 import Composer from '../components/Composer'
@@ -49,7 +50,7 @@ function Welcome({ onSend }) {
 export default function ChatPage() {
   const { chatId } = useParams()
   const navigate = useNavigate()
-  const { chats, newChat, sendMessage, stopGeneration, user } = useStore()
+  const { chats, newChat, sendMessage, stopGeneration, user, showToast } = useStore()
   const found = chats.find((c) => c.id === chatId)
   // Someone else's chat opens read-only, and only for people who review (e.g. a Review Queue source link).
   const mine = !found || chatOwner(found) === user.id
@@ -58,19 +59,52 @@ export default function ChatPage() {
   const bottom = useRef(null)
   const scroller = useRef(null)
 
-  const streaming = chat?.messages.some((m) => m.responses?.some((r) => r.streaming))
-  const lastContent = chat?.messages.at(-1)?.responses?.map((r) => r.content.length).join() + (chat?.messages.at(-1)?.detectionState || '')
+  // Fetched source chat (from the API) when the chat isn't in the local store.
+  const [sourceChat, setSourceChat] = useState(null)
+  const [sourceOwner, setSourceOwner] = useState(null)
 
   useEffect(() => {
-    if (chatId && !chat) navigate('/', { replace: true })
-  }, [chatId, chat, navigate])
+    // When the chat is in the local store, clear any fetched copy.
+    if (found || !chatId) { setSourceChat(null); setSourceOwner(null); return }
+    if (!canOpenQueue(user) || USE_MOCK) return
+
+    let cancelled = false
+    apiFor(user).getChat(chatId)
+      .then((data) => {
+        if (cancelled) return
+        setSourceOwner({ id: data.ownerId, name: data.ownerName })
+        setSourceChat(fromApiChat(data, data.ownerId))
+      })
+      .catch((err) => {
+        if (cancelled) return
+        showToast(err instanceof ApiError && err.status === 404
+          ? "You don't have access to that conversation"
+          : `Couldn't load the conversation — ${err.message}`)
+        navigate('/', { replace: true })
+      })
+    return () => { cancelled = true }
+  }, [chatId, found, user, navigate, showToast])
+
+  const viewChat = chat || sourceChat
+  const viewMine = mine || (sourceChat ? false : true)
+  const viewOwner = owner || sourceOwner
+  const streaming = viewChat?.messages.some((m) => m.responses?.some((r) => r.streaming))
+  const lastContent = viewChat?.messages.at(-1)?.responses?.map((r) => r.content.length).join() + (viewChat?.messages.at(-1)?.detectionState || '')
+
+  useEffect(() => {
+    if (chatId && !viewChat) {
+      // Mock mode or non-reviewer: no fetch fallback; go home.
+      if (!USE_MOCK && canOpenQueue(user)) return // fetch is in flight
+      navigate('/', { replace: true })
+    }
+  }, [chatId, viewChat, navigate, user])
 
   useEffect(() => {
     const el = scroller.current
     if (!el) return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
     if (nearBottom) bottom.current?.scrollIntoView({ block: 'end' })
-  }, [lastContent, chat?.messages.length])
+  }, [lastContent, viewChat?.messages.length])
 
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }) }, [chatId])
 
@@ -80,7 +114,7 @@ export default function ChatPage() {
     sendMessage(id, text, opts)
   }
 
-  const empty = !chat || chat.messages.length === 0
+  const empty = !viewChat || viewChat.messages.length === 0
 
   return (
     <div className="flex h-full flex-col">
@@ -91,19 +125,19 @@ export default function ChatPage() {
         <>
           <div ref={scroller} className="flex-1 overflow-y-auto">
             <div className="mx-auto max-w-3xl space-y-8 px-4 pb-10 pt-6">
-              {chat.messages.map((m) =>
-                m.role === 'user' ? <UserMessage key={m.id} msg={m} /> : <AssistantMessage key={m.id} chatId={chat.id} msg={m} />,
+              {viewChat.messages.map((m) =>
+                m.role === 'user' ? <UserMessage key={m.id} msg={m} /> : <AssistantMessage key={m.id} chatId={viewChat.id} msg={m} />,
               )}
               <div ref={bottom} />
             </div>
           </div>
-          {!mine ? (
+          {!viewMine ? (
             <p className="flex items-center justify-center gap-1.5 px-4 pb-4 text-xs text-gray-500">
-              <Eye size={13} /> Viewing {owner?.name || 'another person'}’s conversation as the source of a review. It’s read-only.
+              <Eye size={13} /> Viewing {viewOwner?.name || 'another person'}’s conversation as the source of a review. It’s read-only.
             </p>
           ) : (
           <div className="px-4 pb-3">
-            <Composer onSend={onSend} streaming={streaming} onStop={() => stopGeneration(chat.id)} />
+            <Composer onSend={onSend} streaming={streaming} onStop={() => stopGeneration(viewChat.id)} />
             <p className="mt-2 text-center text-[11px] text-gray-500">
               Fractal can make mistakes. Recommendations should be verified by a qualified person.
             </p>

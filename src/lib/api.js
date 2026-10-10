@@ -261,6 +261,7 @@ export function apiFor(user) {
   const call = (method, path, body) => request(user, method, path, body)
   return {
     listChats: () => call('GET', '/chats'),
+    getChat: (id) => call('GET', `/chats/${enc(id)}`),
     saveChat: (c) => call('PUT', `/chats/${enc(c.id)}`, { title: c.title, folder: c.folder ?? null, pinned: !!c.pinned }),
     deleteChat: (id) => call('DELETE', `/chats/${enc(id)}`).catch((e) => { if (e.status !== 404) throw e }),
     saveMessage: (chatId, m) => call('PUT', `/chats/${enc(chatId)}/messages/${enc(m.id)}`, toApiMessage(m)),

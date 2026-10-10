@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.main import app
-from app.models import AuditLog, Expertise, ExpertiseVersion, Profile
+from app.models import AuditLog, Expertise, ExpertiseVersion, Profile, Proposal
 
 ADRIAN = "a1b2c3d4-0000-4000-8000-00000000ad01"
 PRIYA = "a1b2c3d4-0000-4000-8000-00000000ad02"
@@ -275,3 +275,65 @@ def test_audit_log_actor_works_on_sqlite_variant():
     assert isinstance(sqlite_type, SaString), (
         f"audit_log.actor should be String on SQLite, got {type(sqlite_type).__name__}"
     )
+
+
+# --- source chat read-only for reviewers & experts -----------------------------------
+
+def _seed_source_chat(db):
+    """Create a chat owned by Hafiz and a proposal linking to it as the source."""
+    _send(HAFIZ)
+    db.add(Proposal(
+        id="prop-src", expertise_id="exp-chiller", type="revision",
+        author="Hafiz Rahman (captured from chat)", reason="Seen on site",
+        changes={"knowledge": {"add": ["Check condenser approach."], "remove": []}},
+        chat_id="chat-a", status="open",
+        sources=[{"type": "conversation", "chatId": "chat-a", "excerpt": "..."}],
+    ))
+    db.commit()
+
+
+def test_owner_can_read_own_chat(db):
+    _seed_source_chat(db)
+    r = client.get("/api/chats/chat-a", headers=as_(HAFIZ))
+    assert r.status_code == 200
+    assert r.json()["ownerId"] and r.json()["ownerName"]
+
+
+def test_reviewer_can_read_source_chat(db):
+    _seed_source_chat(db)
+    r = client.get("/api/chats/chat-a", headers=as_(ADRIAN))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ownerId"] != ADRIAN  # not the reviewer's own chat
+    # Non-owner access writes an audit row.
+    assert db.query(AuditLog).filter_by(
+        action="chat.view_source", target_id="chat-a"
+    ).count() == 1
+
+
+def test_domain_expert_can_read_source_chat(db):
+    """Priya is a Technical Services expert; exp-chiller is in Technical Services."""
+    _seed_source_chat(db)
+    r = client.get("/api/chats/chat-a", headers=as_(PRIYA))
+    assert r.status_code == 200
+    assert db.query(AuditLog).filter_by(
+        action="chat.view_source", target_id="chat-a"
+    ).count() == 1
+
+
+def test_out_of_domain_expert_gets_404(db):
+    """Marcus is a Leasing expert; chat-a is the source of a Technical Services proposal."""
+    _seed_source_chat(db)
+    assert client.get("/api/chats/chat-a", headers=as_(MARCUS)).status_code == 404
+
+
+def test_intern_gets_404(db):
+    _seed_source_chat(db)
+    assert client.get("/api/chats/chat-a", headers=as_(ETHAN)).status_code == 404
+
+
+def test_no_source_link_means_404_for_non_owner(db):
+    """Without a proposal/expertise referencing the chat, non-owners get 404."""
+    _send(HAFIZ)
+    assert client.get("/api/chats/chat-a", headers=as_(PRIYA)).status_code == 404
+    assert client.get("/api/chats/chat-a", headers=as_(ADRIAN)).status_code == 200
