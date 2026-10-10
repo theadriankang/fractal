@@ -3,27 +3,28 @@
 | Part | Host | Notes |
 |---|---|---|
 | Website (React/Vite) | Vercel | `vercel.json` at the repo root; builds `dist/` |
-| Backend (FastAPI) | Hugging Face Space (Docker, CPU basic) | `deploy/hf-space/` — the Space pulls `main` from GitHub at build time |
+| Backend (FastAPI) | Google Cloud Run | `backend/Dockerfile`; redeploys on every push to `main` |
 | Database, Auth, Edge Function `meetings` | Supabase | unchanged |
 
-## 1. Backend — Hugging Face Space
-1. New Space → SDK **Docker** → hardware **CPU basic** → visibility **Public** (Vercel must reach it; the access code protects it).
-2. Add the two files from `deploy/hf-space/` (`Dockerfile`, `README.md`) to the Space.
-3. Space → Settings → **Variables and secrets** → add as *Secrets*:
+## 1. Backend — Google Cloud Run
+1. Google Cloud project with billing enabled (the free tier covers demo traffic).
+2. Cloud Run → **Deploy container** → **Service** → "Continuously deploy from a repository" → connect GitHub repo `theadriankang/fractal`, branch `^main$`, build type **Dockerfile**, source location `/backend/Dockerfile`.
+3. Region `asia-southeast1` (Singapore, next to Supabase). Authentication: **Allow unauthenticated** (the access code protects it). Memory **1 GiB**, CPU 1, minimum instances 0, maximum 3, request timeout 300 s.
+4. Variables & Secrets → add:
    - `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` (same values as `backend/.env`)
    - `ACCESS_CODE` — the shared code you give judges
    - `RATE_LIMIT_PER_MINUTE` — e.g. `20`
    - `CORS_ORIGINS` — JSON list, e.g. `["https://fractal-xxxx.vercel.app"]`
-4. The backend URL is `https://<hf-username>-<space-name>.hf.space` — check `/api/health`.
-5. New backend code: merge to `main`, then Space → Settings → **Factory reboot**.
+5. The service URL looks like `https://fractal-backend-xxxx.asia-southeast1.run.app` — check `/api/health`.
+6. Every push to `main` rebuilds and redeploys automatically (Cloud Build trigger). Older revisions stay available for rollback.
 
 ## 2. Website — Vercel
 1. Add New → Project → import the GitHub repo. Framework: Vite (auto).
 2. Environment variables:
-   - `VITE_API_BASE` = the Space URL from step 1.4 (no trailing slash)
+   - `VITE_API_BASE` = the Cloud Run URL from step 1.5 (no trailing slash)
    - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (same as the root `.env.local`)
 3. Deploy. Every push to `main` redeploys automatically.
-4. Put the Vercel URL into the Space's `CORS_ORIGINS` and factory-reboot the Space.
+4. Put the Vercel URL into the Cloud Run service's `CORS_ORIGINS` (Edit & deploy new revision).
 
 ## Demo safety
 - `ACCESS_CODE` gates every `/api` call except `/api/health` and `/api/access/check`.
