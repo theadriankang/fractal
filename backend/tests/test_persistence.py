@@ -241,3 +241,37 @@ def test_approve_succeeds_even_when_embedder_raises(db, monkeypatch):
     r = client.post("/api/expertise/exp-chiller/approve", json={"note": "LGTM"}, headers=as_(PRIYA))
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "approved"
+
+
+# --- regression: audit_log.actor must be UUID, not varchar ---------------------------
+
+def test_audit_log_actor_column_is_uuid_on_postgres():
+    """The audit_log.actor column is `uuid` in Postgres (migration
+    20261010_core_schema.sql). The ORM model must use PgUUID so psycopg
+    sends the right type — otherwise every governance write 500s with
+    'column "actor" is of type uuid but expression is of type character
+    varying' (regression for the audit-actor-uuid fix).
+    """
+    from sqlalchemy.dialects.postgresql import UUID as PgUUID
+
+    col = AuditLog.__table__.c.actor
+    # On the Postgres dialect the column type must resolve to UUID.
+    pg_type = col.type.dialect_impl(dialect=__import__(
+        "sqlalchemy.dialects.postgresql", fromlist=["dialect"]
+    ).dialect())
+    assert isinstance(pg_type, PgUUID), (
+        f"audit_log.actor should be PgUUID on Postgres, got {type(pg_type).__name__}"
+    )
+
+
+def test_audit_log_actor_works_on_sqlite_variant():
+    """The SQLite variant must be String so in-memory tests don't break."""
+    from sqlalchemy import String as SaString
+
+    col = AuditLog.__table__.c.actor
+    sqlite_type = col.type.dialect_impl(dialect=__import__(
+        "sqlalchemy.dialects.sqlite", fromlist=["dialect"]
+    ).dialect())
+    assert isinstance(sqlite_type, SaString), (
+        f"audit_log.actor should be String on SQLite, got {type(sqlite_type).__name__}"
+    )

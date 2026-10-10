@@ -165,7 +165,7 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
     id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-    actor: Mapped[str | None] = mapped_column(String, nullable=True)
+    actor: Mapped[str | None] = mapped_column(PgUUID(as_uuid=False).with_variant(String, "sqlite"), nullable=True)
     actor_role: Mapped[str | None] = mapped_column(String, nullable=True)
     action: Mapped[str] = mapped_column(Text, default="")
     target_type: Mapped[str | None] = mapped_column(Text, nullable=True)
