@@ -9,7 +9,9 @@ export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 // Filled from GET /api/models on first load. Unavailable models keep the
 // existing mock fallback so the front end always works, even with no keys.
 let _liveModels = new Set()
+let _modelAvailability = {} // { id: { available, provider } }
 let _fetched = false
+let _backendOnline = false
 let _retryTimer = null
 let _lastRetry = 0
 const _RETRY_MS = 10_000
@@ -20,8 +22,10 @@ async function refreshLiveModels() {
     const res = await fetch('/api/models')
     if (res.ok) {
       const list = await res.json()
+      _modelAvailability = Object.fromEntries(list.map((m) => [m.id, m]))
       _liveModels = new Set(list.filter((m) => m.available).map((m) => m.id))
       _fetched = true
+      _backendOnline = true
     }
   } catch {
     // Backend offline — leave _liveModels empty; isLive returns false.
@@ -44,6 +48,21 @@ export function isLive(modelId) {
     }
   }
   return _liveModels.has(modelId)
+}
+
+/** True when the backend responded to /api/models at least once. */
+export function backendOnline() {
+  return _backendOnline
+}
+
+/**
+ * Full availability map from GET /api/models.
+ * Returns { id: { available, provider } } or null when the backend hasn't
+ * responded yet (so callers can distinguish "still loading" / "offline"
+ * from "responded — here's the truth").
+ */
+export function getModelAvailability() {
+  return _fetched ? _modelAvailability : null
 }
 
 /** Re-fetch the live model list from the backend (returns a promise). */

@@ -2,6 +2,8 @@
 // Placeholder list for the front-end prototype — edit freely when the backend
 // exposes the real model list (e.g. GET /api/models).
 
+import { USE_MOCK } from '../lib/api'
+
 export const PROVIDERS = [
   { id: 'anthropic', name: 'Anthropic', color: '#d97757', initial: 'A' },
   { id: 'openai', name: 'OpenAI', color: '#10a37f', initial: 'O' },
@@ -55,4 +57,54 @@ export function routeAuto(prompt = '') {
     return { modelId: 'gemini-flash', category: 'Quick question', reason: 'Short prompt — fastest capable model' }
   }
   return { modelId: 'gpt-5-mini', category: 'General', reason: 'General task — balanced cost and quality' }
+}
+
+// ---------------------------------------------------------------------------
+// Availability helpers (used by the UI and auto-routing fallback).
+// ---------------------------------------------------------------------------
+
+/** Best Claude model to fall back to, in preference order. */
+export const CLAUDE_FALLBACK_ORDER = ['claude-sonnet', 'claude-opus', 'claude-haiku']
+
+/**
+ * Returns a function isModelAvailable(modelId) that respects:
+ * - VITE_USE_MOCK=true → everything is available (demo fallback)
+ * - backend offline (null map) → everything is available (keep today's mock behaviour)
+ * - backend responded → use the availability map
+ */
+export function makeAvailabilityChecker(modelAvailability) {
+  return (modelId) => {
+    if (USE_MOCK) return true
+    if (modelAvailability === null) return true // backend offline → keep mock behaviour
+    const info = modelAvailability[modelId]
+    return info ? info.available : false
+  }
+}
+
+/**
+ * Picks the best available Claude model for auto-routing fallback.
+ * Returns a model id or null if no Claude model is available.
+ */
+export function bestAvailableClaude(isAvailable) {
+  return CLAUDE_FALLBACK_ORDER.find((id) => isAvailable(id)) || null
+}
+
+/**
+ * Wraps routeAuto with availability awareness. If the originally routed model
+ * is unavailable, falls back to the best available Claude model and rewrites
+ * the reason to be honest about the fallback.
+ */
+export function routeAutoWithFallback(prompt = '', isAvailable) {
+  const route = routeAuto(prompt)
+  if (isAvailable(route.modelId)) return route
+
+  const fallbackId = bestAvailableClaude(isAvailable)
+  if (!fallbackId) return route // nothing available — let the mock handle it
+
+  const fallbackModel = getModel(fallbackId)
+  return {
+    modelId: fallbackId,
+    category: route.category,
+    reason: `${route.category} → ${fallbackModel?.name || fallbackId} (${getModel(route.modelId)?.name || route.modelId} not configured)`,
+  }
 }

@@ -4,9 +4,9 @@ import { SEED_CHATS } from './data/chats'
 import { SEED_EXPERTISE, SEED_PROPOSALS, CONTENT_FIELDS } from './data/expertise'
 import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfolio'
 import { migrateDemoState } from './data/demoMigration'
-import { PROVIDERS, routeAuto } from './data/models'
+import { PROVIDERS, routeAuto, routeAutoWithFallback, makeAvailabilityChecker, getModel } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
-import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend } from './lib/api'
+import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend, refreshLiveModels, getModelAvailability } from './lib/api'
 import { DEMO_USERS, authenticate, userById } from './data/users'
 import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit, deleteBlock } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
@@ -196,6 +196,9 @@ export const useStore = create(
       settingsOpen: false,
       settingsTab: 'general',
       toast: null,
+      // null = backend hasn't responded yet (treat everything as available / mock fallback).
+      // {} = backend responded with the availability map.
+      modelAvailability: null,
 
       // ---------------- ui actions ----------------
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -238,6 +241,35 @@ export const useStore = create(
       logoutAll: () => set({ user: null, session: { activeId: null, signedIn: [] } }),
 
       setSelectedModels: (ids) => set({ selectedModels: ids.length ? ids : ['auto'] }),
+
+      // Fetch /api/models and store the availability map. Called on app start
+      // and when the model picker opens. In mock mode it's a no-op.
+      refreshModelAvailability: async () => {
+        if (USE_MOCK) { set({ modelAvailability: {} }); return }
+        await refreshLiveModels()
+        const map = getModelAvailability()
+        if (map !== null) {
+          set({ modelAvailability: map })
+          get()._checkSelectedModelsAvailability()
+        }
+      },
+
+      // Returns a boolean checker for whether a modelId is currently available.
+      // Respects mock mode and offline (null map → everything available).
+      isModelAvailable: () => makeAvailabilityChecker(get().modelAvailability),
+
+      // Internal: if a persisted selectedModel is now unavailable, switch to auto + toast once.
+      _checkSelectedModelsAvailability: () => {
+        const { selectedModels, modelAvailability } = get()
+        if (modelAvailability === null) return // backend hasn't responded
+        const isAvailable = makeAvailabilityChecker(modelAvailability)
+        const unavailable = selectedModels.filter((m) => m !== 'auto' && !isAvailable(m))
+        if (!unavailable.length) return
+        const fixed = selectedModels.map((m) => (m === 'auto' || isAvailable(m) ? m : 'auto'))
+        set({ selectedModels: fixed.length ? fixed : ['auto'] })
+        const names = unavailable.map((id) => getModel(id)?.name || id)
+        get().showToast(`${names.join(', ')} no longer available — switched to Auto. Add a key in backend/.env.`)
+      },
 
       // Loads the signed-in account's chats, the Library and the open Review Queue from Supabase.
       loadFromBackend: async ({ quiet = false } = {}) => {
@@ -336,7 +368,8 @@ export const useStore = create(
         })
 
         const responses = enabledModels.map((mid) => {
-          const auto = mid === 'auto' ? routeAuto(text) : null
+          const isAvailable = makeAvailabilityChecker(get().modelAvailability)
+          const auto = mid === 'auto' ? routeAutoWithFallback(text, isAvailable) : null
           return {
             id: uid('r'),
             modelId: auto ? auto.modelId : mid,

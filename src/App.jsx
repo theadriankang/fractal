@@ -31,10 +31,12 @@ function Toast() {
 }
 
 function Shell() {
-  const { sidebarOpen, user, loadFromBackend } = useStore()
+  const { sidebarOpen, user, loadFromBackend, refreshModelAvailability } = useStore()
   const location = useLocation()
   // Chats, the Library and the Review Queue load from Supabase for whoever is signed in.
   useEffect(() => { if (user) loadFromBackend() }, [user?.id])
+  // Fetch model availability on app start so the picker and auto-router know which models have keys.
+  useEffect(() => { refreshModelAvailability() }, [])
   // Signed out → sign-in page, then back to where the person was going.
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
 
