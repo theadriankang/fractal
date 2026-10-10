@@ -101,6 +101,25 @@ export async function uploadFile(file) {
   return data
 }
 
+/**
+ * POST /api/expertise/match — semantic retrieval of approved Expertise.
+ * Returns [{id, name, version, score, reason}] or null if the backend is offline.
+ */
+export async function matchExpertiseBackend(query, attachedIds = [], limit = 3) {
+  if (USE_MOCK) return null
+  try {
+    const res = await fetch('/api/expertise/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, attachedIds, limit }),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
 // The Expertise fields the backend's system prompt uses.
 const EXPERTISE_FIELDS = ['id', 'name', 'version', 'status', 'owner', 'whenToUse', 'knowledge', 'decisionLogic', 'guardrails', 'escalation']
 const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, e[f]]))

@@ -6,7 +6,7 @@ import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfo
 import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
-import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat } from './lib/api'
+import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend } from './lib/api'
 import { DEMO_USERS, authenticate, userById } from './data/users'
 import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit, deleteBlock } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
@@ -297,13 +297,33 @@ export const useStore = create(
       patchMessage: (chatId, msgId, fn) =>
         get().patchChat(chatId, (c) => ({ ...c, messages: c.messages.map((m) => (m.id === msgId ? fn(m) : m)) })),
 
-      sendMessage: (chatId, text, { attachedExpertise = [], files = [], webSearch = false } = {}) => {
+      sendMessage: async (chatId, text, { attachedExpertise = [], files = [], webSearch = false } = {}) => {
         const { settings, expertise, selectedModels } = get()
         const enabledModels = selectedModels
         // The answer is stamped 1 ms after the question so the saved order is stable.
         const sentAt = Date.now()
         const userMsg = { id: uid('m'), role: 'user', content: text, files, attachedExpertise, webSearch, createdAt: new Date(sentAt).toISOString() }
-        const matched = matchExpertise(text, expertise, attachedExpertise, settings.autoApply)
+
+        // Semantic Expertise retrieval via backend, with local fallback.
+        let matched
+        const backendResults = await matchExpertiseBackend(text, attachedExpertise, 3)
+        if (backendResults && backendResults.length > 0) {
+          // Map the backend results to full Expertise objects from the store.
+          const byId = Object.fromEntries(expertise.map((e) => [e.id, e]))
+          matched = backendResults
+            .map((r) => byId[r.id])
+            .filter(Boolean)
+          // Ensure attached ids are included even if the store doesn't have them.
+          attachedExpertise.forEach((aid) => {
+            if (!matched.some((e) => e.id === aid)) {
+              const e = byId[aid]
+              if (e) matched.push(e)
+            }
+          })
+        } else {
+          // Fallback: local keyword matcher (also used for VITE_USE_MOCK or backend offline).
+          matched = matchExpertise(text, expertise, attachedExpertise, settings.autoApply)
+        }
 
         const responses = enabledModels.map((mid) => {
           const auto = mid === 'auto' ? routeAuto(text) : null
