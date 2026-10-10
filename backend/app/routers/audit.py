@@ -265,26 +265,35 @@ def list_audit(
         except ValueError:
             pass
 
-    q = q.order_by(AuditLog.at.desc(), AuditLog.id.desc()).limit(limit + 1)
-    rows = q.all()
+    q = q.order_by(AuditLog.at.desc(), AuditLog.id.desc())
+
+    # Domain scoping happens after the query (the domain lives on the target
+    # Expertise), so page through the log until we have limit + 1 visible rows.
+    scoped = user.role != "reviewer" or bool(domain)
+    user_domains = set(user.domains or [])
+    batch = limit + 1 if not scoped else max(4 * limit, 100)
+    rows: list[AuditLog] = []
+    domains: dict = {}
+    offset = 0
+    for _ in range(20):  # hard cap on round trips
+        chunk = q.offset(offset).limit(batch).all()
+        if not chunk:
+            break
+        offset += len(chunk)
+        chunk_domains = _resolve_domains(db, chunk)
+        for r in chunk:
+            d = chunk_domains.get(r.id)
+            if user.role != "reviewer" and d not in user_domains:
+                continue
+            if domain and d != domain:
+                continue
+            rows.append(r)
+            domains[r.id] = d
+        if len(rows) > limit or len(chunk) < batch or not scoped:
+            break
 
     has_more = len(rows) > limit
     rows = rows[:limit]
-
-    if not rows:
-        return AuditPage(entries=[], hasMore=False)
-
-    # --- Resolve domains for access control + filtering ---------------------
-    domains = _resolve_domains(db, rows)
-
-    # Contributor: keep only entries in the user's domains.
-    if user.role != "reviewer":
-        user_domains = set(user.domains or [])
-        rows = [r for r in rows if domains.get(r.id) in user_domains]
-
-    # Domain filter (reviewer or expert can further narrow).
-    if domain:
-        rows = [r for r in rows if domains.get(r.id) == domain]
 
     if not rows:
         return AuditPage(entries=[], hasMore=False)
@@ -299,10 +308,10 @@ def list_audit(
         actor_role = actor_p.role if actor_p else r.actor_role
 
         tgt_name = None
-        if r.target_type == "expertise" and r.target_id:
-            tgt_name = target_names.get(r.target_id)
-        elif r.target_type == "proposal" and r.target_id:
-            tgt_name = target_names.get(r.target_id)
+        if r.target_type in ("expertise", "proposal") and r.target_id:
+            # Deleted rows can't be looked up any more; fall back to the name the
+            # audit entry recorded at the time.
+            tgt_name = target_names.get(r.target_id) or (r.detail or {}).get("name")
         elif r.target_type == "chat" and r.target_id:
             tgt_name = "source conversation"
 

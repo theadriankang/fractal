@@ -187,3 +187,26 @@ def test_cursor_pagination(db):
     # The next entry should be older.
     assert len(page2["entries"]) == 1
     assert page2["entries"][0]["at"] < before
+
+
+# --- regression: domain scoping must not be cut off by the page size ---------
+
+def test_expert_sees_own_domain_even_when_newest_entries_are_elsewhere(db):
+    # One Technical Services entry, then many newer Leasing entries.
+    client.post("/api/expertise/exp-chiller/approve", headers=as_(ADRIAN))
+    for _ in range(8):
+        client.post("/api/expertise/exp-lease/feedback", headers=as_(ADRIAN), json={"rating": "up"})
+        client.patch("/api/expertise/exp-lease", headers=as_(ADRIAN), json={"keywords": ["renewal"]})
+    r = client.get("/api/audit?limit=3", headers=as_(HAFIZ))
+    assert r.status_code == 200
+    entries = r.json()["entries"]
+    assert entries, "expert should still see the Technical Services entry"
+    assert all(e["domain"] == "Technical Services" for e in entries)
+
+
+def test_deleted_target_keeps_its_name_in_the_summary(db):
+    client.post("/api/expertise/exp-lease/reject", headers=as_(ADRIAN), json={})
+    client.delete("/api/expertise/exp-lease", headers=as_(ADRIAN))
+    r = client.get("/api/audit?action=expertise.delete", headers=as_(ADRIAN))
+    summaries = [e["summary"] for e in r.json()["entries"]]
+    assert any("Renewal Negotiation Playbook" in s for s in summaries), summaries
