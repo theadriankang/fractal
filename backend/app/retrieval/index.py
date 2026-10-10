@@ -141,7 +141,7 @@ def search(
     query: str,
     *,
     attached_ids: list[str] | None = None,
-    limit: int = 3,
+    limit: int = 2,
 ) -> list[dict]:
     """Hybrid ranking: cosine similarity + keyword overlap boost.
 

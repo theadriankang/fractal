@@ -343,7 +343,7 @@ export const useStore = create(
         const byId = Object.fromEntries(expertise.map((e) => [e.id, e]))
         let matched
         if (settings.autoApply) {
-          const backendResults = await matchExpertiseBackend(text, attachedExpertise, 3)
+          const backendResults = await matchExpertiseBackend(text, attachedExpertise, 2)
           if (backendResults === null) {
             // Backend offline or mock mode → local keyword fallback.
             matched = matchExpertise(text, expertise, attachedExpertise, settings.autoApply)

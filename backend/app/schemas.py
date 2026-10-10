@@ -265,7 +265,7 @@ class HealthOut(CamelModel):
 class ExpertiseMatchRequest(BaseModel):
     query: str
     attached_ids: list[str] = Field(default_factory=list)
-    limit: int = 3
+    limit: int = 2
 
 
 class ExpertiseMatchItem(BaseModel):
