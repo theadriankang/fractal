@@ -60,7 +60,7 @@ function ExpertiseUsed({ refs }) {
   )
 }
 
-function ResponseCard({ chatId, msg, idx, compare }) {
+function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
   const r = msg.responses[idx]
   const { regenerate, rateResponse, user, expertise } = useStore()
   const usedDomain = expertise.find((e) => e.id === r.expertise?.[0]?.id)?.domain
@@ -96,7 +96,8 @@ function ResponseCard({ chatId, msg, idx, compare }) {
           <ExpertiseUsed refs={r.expertise} />
           <div className="mt-2 flex items-center gap-0.5 text-gray-500">
             <button className="icon-btn" onClick={copy} title="Copy">{copied ? <Check size={15} /> : <Copy size={15} />}</button>
-            <button className="icon-btn" onClick={() => regenerate(chatId, msg.id, idx)} title="Regenerate"><RefreshCw size={15} /></button>
+            {!readOnly && <button className="icon-btn" onClick={() => regenerate(chatId, msg.id, idx)} title="Regenerate"><RefreshCw size={15} /></button>}
+            {!readOnly && (<>
             <button
               className={`icon-btn ${r.rating === 'up' ? 'text-emerald-500' : ''}`}
               onClick={() => rateResponse(chatId, msg.id, idx, 'up')}
@@ -113,6 +114,7 @@ function ResponseCard({ chatId, msg, idx, compare }) {
             >
               <ThumbsDown size={15} fill={r.rating === 'down' ? 'currentColor' : 'none'} />
             </button>
+            </>)}
           </div>
         </>
       )}
@@ -155,14 +157,14 @@ function ResponseCard({ chatId, msg, idx, compare }) {
 }
 
 
-export function AssistantMessage({ chatId, msg }) {
+export function AssistantMessage({ chatId, msg, readOnly = false }) {
   const compare = msg.responses.length > 1
   return (
     <div className="animate-fadeIn">
       <div className={compare ? `grid gap-3 ${msg.responses.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'}` : ''}>
-        {msg.responses.map((_, i) => <ResponseCard key={i} chatId={chatId} msg={msg} idx={i} compare={compare} />)}
+        {msg.responses.map((_, i) => <ResponseCard key={i} chatId={chatId} msg={msg} idx={i} compare={compare} readOnly={readOnly} />)}
       </div>
-      <CaptureCard key={msg.detection ? 'detected' : 'none'} chatId={chatId} msg={msg} />
+      {!readOnly && <CaptureCard key={msg.detection ? 'detected' : 'none'} chatId={chatId} msg={msg} />}
     </div>
   )
 }

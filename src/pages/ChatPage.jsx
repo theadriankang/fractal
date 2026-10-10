@@ -86,7 +86,8 @@ export default function ChatPage() {
   }, [chatId, found, user, navigate, showToast])
 
   const viewChat = chat || sourceChat
-  const viewMine = mine || (sourceChat ? false : true)
+  // A chat fetched from the API (not in this person's own list) always belongs to someone else.
+  const viewMine = sourceChat ? false : mine
   const viewOwner = owner || sourceOwner
   const streaming = viewChat?.messages.some((m) => m.responses?.some((r) => r.streaming))
   const lastContent = viewChat?.messages.at(-1)?.responses?.map((r) => r.content.length).join() + (viewChat?.messages.at(-1)?.detectionState || '')
@@ -126,7 +127,7 @@ export default function ChatPage() {
           <div ref={scroller} className="flex-1 overflow-y-auto">
             <div className="mx-auto max-w-3xl space-y-8 px-4 pb-10 pt-6">
               {viewChat.messages.map((m) =>
-                m.role === 'user' ? <UserMessage key={m.id} msg={m} /> : <AssistantMessage key={m.id} chatId={viewChat.id} msg={m} />,
+                m.role === 'user' ? <UserMessage key={m.id} msg={m} /> : <AssistantMessage key={m.id} chatId={viewChat.id} msg={m} readOnly={!viewMine} />,
               )}
               <div ref={bottom} />
             </div>
