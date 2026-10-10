@@ -3,8 +3,11 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Pencil, Save, Send, Check, Archive, Download, MessageSquarePlus, RotateCcw, GitCompare, FileText, MessagesSquare, Mic,
   Link2, ThumbsUp, ThumbsDown, Trash2, ChevronDown, ChevronLeft, ChevronRight, Copy, ShieldCheck, Info, AlertTriangle,
+  ClipboardList, Plus, X, RotateCw, GitPullRequestArrow, Eye,
 } from 'lucide-react'
 import { useStore } from '../store'
+import { USE_MOCK, apiFor } from '../lib/api'
+import { isIntern } from '../lib/permissions'
 import { CONTENT_FIELDS } from '../data/expertise'
 import { TAXONOMY, ASSET_TYPES, domainMeta, slugify, flatOrder } from '../data/taxonomy'
 import { StatusBadge, fmtDate, timeAgo, Dropdown, Modal } from '../components/ui'
@@ -204,6 +207,68 @@ function Versions({ e }) {
   )
 }
 
+const ACTIVITY_ICON = {
+  'expertise.create': Plus,
+  'expertise.update': Pencil,
+  'expertise.submit': Send,
+  'expertise.approve': Check,
+  'expertise.reject': X,
+  'expertise.deprecate': Archive,
+  'expertise.restore': RotateCw,
+  'expertise.rollback': RotateCcw,
+  'expertise.delete': Trash2,
+  'proposal.create': GitPullRequestArrow,
+  'proposal.approve': Check,
+  'proposal.reject': X,
+  'chat.view_source': Eye,
+}
+
+function Activity({ e }) {
+  const user = useStore((s) => s.user)
+  const [entries, setEntries] = useState(null) // null = loading, [] = loaded empty
+
+  useEffect(() => {
+    if (USE_MOCK || isIntern(user) || !user) { setEntries([]); return }
+    let cancelled = false
+    apiFor(user).listAudit({ targetId: e.id, limit: 10 }).then((page) => {
+      if (!cancelled) setEntries(page.entries || [])
+    }).catch(() => { if (!cancelled) setEntries([]) })
+    return () => { cancelled = true }
+  }, [e.id, user?.id]) // eslint-disable-line
+
+  if (USE_MOCK) {
+    return (
+      <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-500 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-400 dark:ring-gray-800">
+        Activity requires the backend.
+      </div>
+    )
+  }
+
+  if (!entries) return <p className="mt-4 text-sm text-gray-500">Loading activity…</p>
+  if (!entries.length) return <p className="mt-3 text-sm text-gray-500">No activity recorded yet.</p>
+
+  return (
+    <div className="mt-4 border-l border-gray-200 pl-5 dark:border-gray-800">
+      {entries.map((a) => {
+        const Icon = ACTIVITY_ICON[a.action] || ClipboardList
+        return (
+          <div key={a.id} className="relative pb-3">
+            <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-gray-300 ring-4 ring-white dark:bg-gray-600 dark:ring-gray-900" />
+            <div className="flex items-start gap-2">
+              <Icon size={13} className="mt-0.5 shrink-0 text-gray-400" />
+              <div>
+                <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400">{a.summary}</p>
+                <p className="text-xs text-gray-500" title={new Date(a.at).toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'short' })}>{timeAgo(a.at)}</p>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+      <Link to="/expertise/audit" className="mt-1 inline-block text-xs text-accent-500 hover:underline">View full audit log →</Link>
+    </div>
+  )
+}
+
 const SOURCE_ICON = { conversation: MessagesSquare, interview: Mic, meeting: Mic, document: FileText }
 function Sources({ e }) {
   if (!e.sources.length) return <p className="mt-3 text-sm text-gray-500">No linked sources.</p>
@@ -328,6 +393,7 @@ export default function ExpertiseDetail() {
       { id: 'sources', label: 'Sources' },
       { id: 'feedback', label: 'Feedback' },
       { id: 'history', label: 'Version history' },
+      { id: 'activity', label: 'Activity' },
     ],
     [],
   )
@@ -548,6 +614,7 @@ export default function ExpertiseDetail() {
         <section><H2 id="sources" count={e.sources.length || null}>Sources</H2><Sources e={e} /></section>
         <section><H2 id="feedback" count={e.feedback.length || null}>Feedback</H2><Feedback e={e} /></section>
         <section><H2 id="history" count={e.versions.length || null}>Version history</H2><Versions e={e} /></section>
+        <section><H2 id="activity">Activity</H2><Activity e={e} /></section>
 
         {/* prev / next */}
         <div className="mt-14 grid gap-3 border-t border-gray-100 pt-6 sm:grid-cols-2 dark:border-gray-850">

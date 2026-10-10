@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Search, ChevronRight, LayoutGrid, ShieldCheck, Plus, X } from 'lucide-react'
+import { Search, ChevronRight, LayoutGrid, ShieldCheck, Plus, X, ClipboardList } from 'lucide-react'
 import { useStore, reviewCount } from '../store'
 import { contributeBlock, canOpenQueue } from '../lib/permissions'
 import { buildTree, slugify, ASSET_TYPES, domainMeta } from '../data/taxonomy'
@@ -83,6 +83,11 @@ export default function ExpertiseNav() {
             <NavLink to="/expertise/review" className={linkCls}>
               <ShieldCheck size={15} /> <span className="flex-1">Review Queue</span>
               {pending > 0 && <span className="rounded-full bg-amber-500/15 px-1.5 text-[11px] font-semibold text-amber-500">{pending}</span>}
+            </NavLink>
+          )}
+          {canOpenQueue(user) && (
+            <NavLink to="/expertise/audit" className={linkCls}>
+              <ClipboardList size={15} /> <span className="flex-1">Audit log</span>
             </NavLink>
           )}
         </div>

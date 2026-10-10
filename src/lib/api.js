@@ -279,5 +279,17 @@ export function apiFor(user) {
     createProposal: (p) => call('POST', '/proposals', p),
     // action: approve (returns the updated Expertise) | reject
     proposalAction: (id, action) => call('POST', `/proposals/${enc(id)}/${action}`),
+
+    listAudit: (params = {}) => {
+      const qs = new URLSearchParams()
+      if (params.targetId) qs.set('targetId', params.targetId)
+      if (params.actor) qs.set('actor', params.actor)
+      if (params.action) qs.set('action', params.action)
+      if (params.domain) qs.set('domain', params.domain)
+      if (params.limit) qs.set('limit', params.limit)
+      if (params.before) qs.set('before', params.before)
+      const s = qs.toString()
+      return call('GET', `/audit${s ? '?' + s : ''}`)
+    },
   }
 }

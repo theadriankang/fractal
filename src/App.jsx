@@ -8,6 +8,7 @@ import ExpertiseLayout from './pages/ExpertiseLayout'
 import ExpertiseHome, { ExpertiseDomain } from './pages/ExpertiseHome'
 import ExpertiseDetail from './pages/ExpertiseDetail'
 import ReviewQueue from './pages/ReviewQueue'
+import AuditLog from './pages/AuditLog'
 import MeetingRecorder from './pages/MeetingRecorder'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
@@ -52,6 +53,7 @@ function Shell() {
           <Route path="/expertise" element={<ExpertiseLayout />}>
             <Route index element={<ExpertiseHome />} />
             <Route path="review" element={<ReviewQueue />} />
+            <Route path="audit" element={<AuditLog />} />
             <Route path="d/:slug" element={<ExpertiseDomain />} />
             <Route path=":id" element={<ExpertiseDetail />} />
           </Route>
