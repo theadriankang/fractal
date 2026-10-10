@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     # Thinking depth for chat answers: low | medium | high | xhigh | max.
     claude_effort: str = "medium"
+    # Ceiling on one Claude reply, thinking included. Caps the worst-case cost of a single answer.
+    claude_max_output_tokens: int = 8000
 
     # Multi-model routing (backend/app/llm/registry.py)
     # OpenRouter for all non-Claude models (unless Hunyuan override applies).
