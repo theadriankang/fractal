@@ -337,3 +337,13 @@ def test_no_source_link_means_404_for_non_owner(db):
     _send(HAFIZ)
     assert client.get("/api/chats/chat-a", headers=as_(PRIYA)).status_code == 404
     assert client.get("/api/chats/chat-a", headers=as_(ADRIAN)).status_code == 200
+
+
+def test_live_expertise_body_changes_only_through_a_proposal(db):
+    client.post("/api/expertise/exp-chiller/approve", headers=as_(PRIYA))
+    r = client.patch("/api/expertise/exp-chiller", json={"knowledge": ["Something new."]}, headers=as_(HAFIZ))
+    assert r.status_code == 409
+    # Metadata (and an unchanged body) can still be saved directly.
+    r = client.patch("/api/expertise/exp-chiller", json={"keywords": ["chiller", "chw"], "knowledge": READY["knowledge"]},
+                     headers=as_(HAFIZ))
+    assert r.status_code == 200 and r.json()["keywords"] == ["chiller", "chw"]

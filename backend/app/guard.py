@@ -13,8 +13,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import settings
 
-# Endpoints that call a model (cost money) or embed text — these get rate limited.
-_AI_PATHS = ("/api/chat/stream", "/api/expertise/extract", "/api/expertise/match", "/api/files")
+# Endpoints that call a paid model — these get rate limited. (Search runs a local model and is
+# called on every message, so it is not counted.)
+_AI_PATHS = ("/api/chat/stream", "/api/expertise/extract", "/api/files")
 # Always reachable: lets the front end check the backend is up and validate a code.
 _OPEN_PATHS = ("/api/health", "/api/access/check")
 

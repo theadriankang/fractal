@@ -23,8 +23,8 @@ export const MODELS = [
   { id: 'gemini-flash', provider: 'google', name: 'Gemini Flash', tags: ['fast', 'multimodal', 'cheap'], context: '1M', speed: 5, cost: 1 },
   { id: 'grok-4', provider: 'xai', name: 'Grok 4', tags: ['realtime', 'news', 'reasoning'], context: '256K', speed: 3, cost: 2 },
   { id: 'grok-fast', provider: 'xai', name: 'Grok Fast', tags: ['fast', 'realtime'], context: '2M', speed: 5, cost: 1 },
-  { id: 'hunyuan-t1', provider: 'tencent', name: 'Hunyuan-T1', tags: ['reasoning', 'chinese', 'math'], context: '128K', speed: 3, cost: 1 },
-  { id: 'hunyuan-turbos', provider: 'tencent', name: 'Hunyuan-TurboS', tags: ['fast', 'chinese', 'general'], context: '128K', speed: 5, cost: 1 },
+  { id: 'hunyuan-t1', provider: 'tencent', name: 'Hunyuan Hy3', tags: ['reasoning', 'chinese', 'math'], context: '128K', speed: 3, cost: 1 },
+  { id: 'hunyuan-turbos', provider: 'tencent', name: 'Hunyuan A13B', tags: ['fast', 'chinese', 'general'], context: '128K', speed: 5, cost: 1 },
   { id: 'deepseek-v3', provider: 'deepseek', name: 'DeepSeek V3', tags: ['coding', 'cheap', 'general'], context: '128K', speed: 4, cost: 1 },
 ]
 

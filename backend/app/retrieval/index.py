@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 # Minimum score to return a match (hybrid score is 0–1).
 MIN_SCORE_THRESHOLD = 0.40
+# A match must score at least this fraction of the best match to be shown alongside it.
+RELATIVE_CUTOFF = 0.85
 
 # Process-level cache for the table-existence check.
 _table_exists_cache: Optional[bool] = None
@@ -40,18 +42,19 @@ def _ensure_table(db: Session) -> bool:
     This function never creates, commits, or rolls back anything — it only reads.
     """
     global _table_exists_cache
-    if _table_exists_cache is not None:
-        return _table_exists_cache
+    # Only a positive answer is cached: a transient failure (cold start, network blip) must not
+    # switch indexing off for the rest of the process.
+    if _table_exists_cache:
+        return True
     if not is_pgvector_available(db):
-        _table_exists_cache = False
         return False
     try:
         row = db.execute(text(
             "select to_regclass('public.expertise_embeddings')"
         )).scalar()
-        _table_exists_cache = row is not None
     except Exception:
-        _table_exists_cache = False
+        return False
+    _table_exists_cache = row is not None
     return _table_exists_cache
 
 
@@ -153,7 +156,28 @@ def search(
     else:
         results = _keyword_search(db, query, attached_ids, limit)
 
+    # Drop weak tag-alongs: keep matches within RELATIVE_CUTOFF of the best one, so a clearly
+    # relevant hit doesn't drag in loosely related Expertise. Attached ones always stay.
+    if results:
+        best = max(r["score"] for r in results)
+        results = [r for r in results if r["id"] in attached_ids or r["score"] >= best * RELATIVE_CUTOFF]
+
     return results[:limit]
+
+
+def sync_missing(db: Session) -> int:
+    """Embed every approved Expertise that has no embedding (or a stale one). Returns how many changed.
+
+    Run at startup so the index repairs itself if a write was ever skipped."""
+    if not _ensure_table(db):
+        return 0
+    have = dict(db.execute(text("select expertise_id, content_hash from expertise_embeddings")).fetchall())
+    changed = 0
+    for e in db.query(Expertise).filter(Expertise.status == "approved").all():
+        if have.get(e.id) != embedder.content_hash(embedder.build_expertise_text(e)):
+            index_expertise(db, e)
+            changed += 1
+    return changed
 
 
 def _hybrid_search(
