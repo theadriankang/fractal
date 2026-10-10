@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # Minimum score to return a match (hybrid score is 0–1).
 MIN_SCORE_THRESHOLD = 0.40
 
+# Process-level cache for the table-existence check.
+_table_exists_cache: Optional[bool] = None
+
 
 def is_pgvector_available(db: Session) -> bool:
     """True when the DB supports the vector extension."""
@@ -31,34 +34,38 @@ def is_pgvector_available(db: Session) -> bool:
 
 
 def _ensure_table(db: Session) -> bool:
-    """Create the expertise_embeddings table if it doesn't exist yet (idempotent).
-    Returns True if the table is usable, False otherwise."""
+    """Check once per process whether the expertise_embeddings table exists.
+
+    Schema is managed exclusively by supabase/migrations (PROJECT_CONTEXT rule 3b).
+    This function never creates, commits, or rolls back anything — it only reads.
+    """
+    global _table_exists_cache
+    if _table_exists_cache is not None:
+        return _table_exists_cache
     if not is_pgvector_available(db):
+        _table_exists_cache = False
         return False
     try:
-        db.execute(text("""
-            create table if not exists expertise_embeddings (
-                expertise_id text primary key references expertise(id) on delete cascade,
-                version       text,
-                content_hash  text,
-                embedding     extensions.vector(384),
-                updated_at    timestamptz default now()
-            )
-        """))
-        db.execute(text("""
-            create index if not exists expertise_embeddings_hnsw_idx
-            on expertise_embeddings using hnsw (embedding extensions.vector_cosine_ops)
-        """))
-        db.commit()
-        return True
-    except Exception as e:
-        logger.warning("Could not ensure expertise_embeddings table: %s", e)
-        return False
+        row = db.execute(text(
+            "select to_regclass('public.expertise_embeddings')"
+        )).scalar()
+        _table_exists_cache = row is not None
+    except Exception:
+        _table_exists_cache = False
+    return _table_exists_cache
 
 
 def index_expertise(db: Session, e: Expertise) -> None:
     """Embed and upsert the embedding for one Expertise (approved only).
-    Skips re-embedding when content_hash is unchanged."""
+    Skips re-embedding when content_hash is unchanged.
+    Never raises into the caller — a failure logs a warning and continues."""
+    try:
+        _index_expertise_inner(db, e)
+    except Exception as exc:
+        logger.warning("index_expertise failed for %s: %s", getattr(e, "id", "?"), exc)
+
+
+def _index_expertise_inner(db: Session, e: Expertise) -> None:
     if e.status != "approved":
         delete_embedding(db, e.id)
         return
@@ -92,7 +99,15 @@ def index_expertise(db: Session, e: Expertise) -> None:
 
 
 def delete_embedding(db: Session, expertise_id: str) -> None:
-    """Remove the embedding for an Expertise (deprecate / delete / reject)."""
+    """Remove the embedding for an Expertise (deprecate / delete / reject).
+    Never raises into the caller — a failure logs a warning and continues."""
+    try:
+        _delete_embedding_inner(db, expertise_id)
+    except Exception as exc:
+        logger.warning("delete_embedding failed for %s: %s", expertise_id, exc)
+
+
+def _delete_embedding_inner(db: Session, expertise_id: str) -> None:
     if not _ensure_table(db):
         return
     db.execute(text(

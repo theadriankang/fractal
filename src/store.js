@@ -304,26 +304,36 @@ export const useStore = create(
         const sentAt = Date.now()
         const userMsg = { id: uid('m'), role: 'user', content: text, files, attachedExpertise, webSearch, createdAt: new Date(sentAt).toISOString() }
 
-        // Semantic Expertise retrieval via backend, with local fallback.
+        // Semantic Expertise retrieval via backend.
+        // autoApply off → only use attached Expertise, skip the match call.
+        // Backend returns null on failure (offline/error/mock) → local fallback.
+        // Backend returns [] when nothing is relevant → stay empty (attached still included).
+        const byId = Object.fromEntries(expertise.map((e) => [e.id, e]))
         let matched
-        const backendResults = await matchExpertiseBackend(text, attachedExpertise, 3)
-        if (backendResults && backendResults.length > 0) {
-          // Map the backend results to full Expertise objects from the store.
-          const byId = Object.fromEntries(expertise.map((e) => [e.id, e]))
-          matched = backendResults
-            .map((r) => byId[r.id])
-            .filter(Boolean)
-          // Ensure attached ids are included even if the store doesn't have them.
-          attachedExpertise.forEach((aid) => {
-            if (!matched.some((e) => e.id === aid)) {
-              const e = byId[aid]
-              if (e) matched.push(e)
-            }
-          })
+        if (settings.autoApply) {
+          const backendResults = await matchExpertiseBackend(text, attachedExpertise, 3)
+          if (backendResults === null) {
+            // Backend offline or mock mode → local keyword fallback.
+            matched = matchExpertise(text, expertise, attachedExpertise, settings.autoApply)
+          } else {
+            // Backend responded — use its results (may be empty = nothing relevant).
+            matched = backendResults
+              .map((r) => byId[r.id])
+              .filter(Boolean)
+          }
         } else {
-          // Fallback: local keyword matcher (also used for VITE_USE_MOCK or backend offline).
-          matched = matchExpertise(text, expertise, attachedExpertise, settings.autoApply)
+          // autoApply off: only attached Expertise.
+          matched = attachedExpertise
+            .map((aid) => byId[aid])
+            .filter(Boolean)
         }
+        // Ensure attached ids are always included.
+        attachedExpertise.forEach((aid) => {
+          if (!matched.some((e) => e.id === aid)) {
+            const e = byId[aid]
+            if (e) matched.push(e)
+          }
+        })
 
         const responses = enabledModels.map((mid) => {
           const auto = mid === 'auto' ? routeAuto(text) : null
