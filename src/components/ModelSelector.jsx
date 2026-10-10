@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { ChevronDown, Check, Plus, X, Search, Sparkles, Zap, Coins } from 'lucide-react'
+import { ChevronDown, Check, Plus, X, Search, Sparkles, Zap, Coins, AlertCircle } from 'lucide-react'
 import { useStore } from '../store'
 import { MODELS, PROVIDERS, getModel } from '../data/models'
 import { ProviderIcon, useClickOutside } from './ui'
+import { USE_MOCK } from '../lib/api'
 
 function Dots({ n, icon: Icon, title }) {
   return (
@@ -21,7 +22,18 @@ function Picker({ value, onChange, onRemove }) {
   const [provider, setProvider] = useState('all')
   const ref = useClickOutside(() => setOpen(false))
   const connections = useStore((s) => s.settings.connections)
+  const modelAvailability = useStore((s) => s.modelAvailability)
+  const refreshModelAvailability = useStore((s) => s.refreshModelAvailability)
   const model = getModel(value)
+
+  // When the picker opens, refresh the availability map from the backend.
+  const toggleOpen = () => {
+    if (!open) refreshModelAvailability()
+    setOpen(!open)
+  }
+
+  // A model is selectable when: mock mode, backend offline (null map), or backend says available.
+  const isSelectable = (id) => USE_MOCK || modelAvailability === null || modelAvailability[id]?.available !== false
 
   const list = MODELS.filter(
     (m) =>
@@ -29,13 +41,13 @@ function Picker({ value, onChange, onRemove }) {
       (m.name.toLowerCase().includes(q.toLowerCase()) || m.tags.some((t) => t.includes(q.toLowerCase()))),
   )
 
-  const pick = (id) => { onChange(id); setOpen(false); setQ('') }
+  const pick = (id) => { if (!isSelectable(id)) return; onChange(id); setOpen(false); setQ('') }
 
   return (
     <div ref={ref} className="relative flex items-center">
       <button
         className="flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-[15px] font-medium hover:bg-gray-100 dark:hover:bg-gray-850"
-        onClick={() => setOpen(!open)}
+        onClick={toggleOpen}
       >
         <ProviderIcon providerId={model?.provider} auto={value === 'auto'} size={20} />
         {value === 'auto' ? 'Auto' : model?.name}
@@ -81,27 +93,34 @@ function Picker({ value, onChange, onRemove }) {
                 <p className="px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-gray-500">
                   {p.name} {!connections[p.id]?.enabled && <span className="normal-case text-red-400">· disabled</span>}
                 </p>
-                {list.filter((m) => m.provider === p.id).map((m) => (
-                  <button
-                    key={m.id}
-                    disabled={!connections[p.id]?.enabled}
-                    className="menu-item disabled:opacity-40"
-                    onClick={() => pick(m.id)}
-                  >
-                    <ProviderIcon providerId={p.id} size={20} />
-                    <span className="flex-1">
-                      <span className="block font-medium">{m.name}</span>
-                      <span className="flex items-center gap-2 text-[11px] text-gray-500">
-                        {m.tags.slice(0, 3).join(' · ')} <span className="text-gray-400">· {m.context}</span>
+                {list.filter((m) => m.provider === p.id).map((m) => {
+                  const selectable = isSelectable(m.id)
+                  return (
+                    <button
+                      key={m.id}
+                      disabled={!selectable}
+                      title={!selectable ? 'Add a key in backend/.env' : undefined}
+                      className={`menu-item ${selectable ? '' : 'opacity-40 cursor-not-allowed'}`}
+                      onClick={() => pick(m.id)}
+                    >
+                      <ProviderIcon providerId={p.id} size={20} />
+                      <span className="flex-1">
+                        <span className={`block font-medium ${selectable ? '' : 'text-gray-400 dark:text-gray-500'}`}>{m.name}</span>
+                        <span className="flex items-center gap-2 text-[11px] text-gray-500">
+                          {m.tags.slice(0, 3).join(' · ')} <span className="text-gray-400">· {m.context}</span>
+                          {!selectable && <span className="flex items-center gap-0.5 text-amber-500"><AlertCircle size={10} /> No API key</span>}
+                        </span>
                       </span>
-                    </span>
-                    <span className="flex flex-col items-end gap-1">
-                      <Dots n={m.speed} icon={Zap} title="Speed" />
-                      <Dots n={m.cost} icon={Coins} title="Cost" />
-                    </span>
-                    {value === m.id && <Check size={16} />}
-                  </button>
-                ))}
+                      {selectable && (
+                        <span className="flex flex-col items-end gap-1">
+                          <Dots n={m.speed} icon={Zap} title="Speed" />
+                          <Dots n={m.cost} icon={Coins} title="Cost" />
+                        </span>
+                      )}
+                      {value === m.id && selectable && <Check size={16} />}
+                    </button>
+                  )
+                })}
               </div>
             ))}
             {list.length === 0 && <p className="p-4 text-center text-sm text-gray-500">No models match</p>}
@@ -113,8 +132,20 @@ function Picker({ value, onChange, onRemove }) {
 }
 
 export default function ModelSelector() {
-  const { selectedModels, setSelectedModels } = useStore()
+  const { selectedModels, setSelectedModels, modelAvailability } = useStore()
   const set = (i, id) => setSelectedModels(selectedModels.map((m, k) => (k === i ? id : m)))
+
+  const isSelectable = (id) => USE_MOCK || modelAvailability === null || modelAvailability[id]?.available !== false
+
+  // Pick a sensible second model for compare: prefer a different provider's available model.
+  const pickCompareModel = () => {
+    const current = selectedModels[0]
+    if (current !== 'claude-sonnet' && isSelectable('claude-sonnet')) return 'claude-sonnet'
+    if (current !== 'gpt-5' && isSelectable('gpt-5')) return 'gpt-5'
+    // Fallback: first available model that isn't already selected.
+    return MODELS.find((m) => !selectedModels.includes(m.id) && isSelectable(m.id))?.id || 'claude-sonnet'
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-0.5">
       {selectedModels.map((m, i) => (
@@ -131,7 +162,7 @@ export default function ModelSelector() {
         <button
           className="icon-btn"
           title="Compare with another model"
-          onClick={() => setSelectedModels([...selectedModels, selectedModels.includes('claude-sonnet') ? 'gpt-5' : 'claude-sonnet'])}
+          onClick={() => setSelectedModels([...selectedModels, pickCompareModel()])}
         >
           <Plus size={16} />
         </button>
