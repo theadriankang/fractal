@@ -12,6 +12,7 @@ import AuditLog from './pages/AuditLog'
 import MeetingRecorder from './pages/MeetingRecorder'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
+import AccessGate from './components/AccessGate'
 
 function LoginRoute() {
   const user = useStore((s) => s.user)
@@ -82,11 +83,13 @@ export default function App() {
 
   return (
     <>
-      <Routes>
-        <Route path="/welcome" element={<Landing />} />
-        <Route path="/login" element={<LoginRoute />} />
-        <Route path="/*" element={<Shell />} />
-      </Routes>
+      <AccessGate>
+        <Routes>
+          <Route path="/welcome" element={<Landing />} />
+          <Route path="/login" element={<LoginRoute />} />
+          <Route path="/*" element={<Shell />} />
+        </Routes>
+      </AccessGate>
       <Toast />
     </>
   )
