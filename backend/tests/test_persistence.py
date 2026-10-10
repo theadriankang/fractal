@@ -220,3 +220,24 @@ def test_thumbs_down_outside_domain_saves_feedback_only(db):
     assert out["proposal"] is None and "Technical Services experts" in out["blocked"]
     assert len(out["expertise"][0]["feedback"]) == 1
     assert db.query(ExpertiseVersion).count() == 0
+
+
+# --- retrieval resilience -------------------------------------------------------
+
+def test_approve_succeeds_even_when_embedder_raises(db, monkeypatch):
+    """index_expertise must never raise into the request: if embedding fails,
+    the approve still returns 200."""
+    from app.retrieval import index as retrieval_index
+
+    # Force _ensure_table to think the embeddings table exists so the code
+    # proceeds to call the embedder / run SQL (which will fail on SQLite).
+    monkeypatch.setattr(retrieval_index, "_table_exists_cache", True)
+
+    # Make the embedder raise.
+    def boom(_text):
+        raise RuntimeError("model download failed")
+    monkeypatch.setattr(retrieval_index.embedder, "embed_text", boom)
+
+    r = client.post("/api/expertise/exp-chiller/approve", json={"note": "LGTM"}, headers=as_(PRIYA))
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "approved"

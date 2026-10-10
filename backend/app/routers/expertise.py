@@ -14,7 +14,10 @@ from ..governance import (
     add_version, audit, bump_version, load_expertise_out, missing_for_review, one_expertise_out, restore, snapshot,
 )
 from ..models import Expertise, ExpertiseVersion, Profile
-from ..schemas import ApproveIn, ExpertiseCreate, ExpertiseOut, ExpertisePatch, RollbackIn, UsageIn
+from ..retrieval.index import delete_embedding, index_expertise, search as retrieval_search
+from ..schemas import (
+    ApproveIn, ExpertiseCreate, ExpertiseMatchItem, ExpertiseMatchRequest, ExpertiseOut, ExpertisePatch, RollbackIn, UsageIn,
+)
 
 router = APIRouter(prefix="/api", tags=["expertise"])
 
@@ -77,6 +80,9 @@ def _save(db: Session, e: Expertise) -> ExpertiseOut:
     e.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(e)
+    # Keep the embedding in sync when the Expertise is approved.
+    if e.status == "approved":
+        index_expertise(db, e)
     return one_expertise_out(db, e)
 
 
@@ -154,6 +160,7 @@ def delete_expertise(
     if user.role != "reviewer" and not (e.status == "draft" and user.role == "contributor" and in_domain(user, e.domain)):
         raise HTTPException(status_code=403, detail="Only the Reviewer, or a domain expert for a draft, can delete this.")
     audit(db, user, "expertise.delete", "expertise", e.id, name=e.name)
+    delete_embedding(db, e.id)
     db.delete(e)
     db.commit()
 
@@ -164,6 +171,17 @@ def record_usage(body: UsageIn, db: Session = Depends(get_db)):
     for e in db.query(Expertise).filter(Expertise.id.in_(body.ids)):
         e.usage_count = (e.usage_count or 0) + 1
     db.commit()
+
+
+# --- semantic match ----------------------------------------------------------
+
+@router.post("/expertise/match", response_model=list[ExpertiseMatchItem])
+def match_expertise(body: ExpertiseMatchRequest, db: Session = Depends(get_db)):
+    """Hybrid ranking (cosine similarity + keyword boost) of approved Expertise."""
+    results = retrieval_search(
+        db, body.query, attached_ids=body.attached_ids, limit=body.limit,
+    )
+    return [ExpertiseMatchItem(**r) for r in results]
 
 
 # --- governance ---------------------------------------------------------------
@@ -204,6 +222,7 @@ def reject_expertise(exp_id: str, user: Profile = Depends(get_current_user), db:
     e = _get(db, exp_id)
     require_reviewer_for(user, e.domain, (e.capture or {}).get("capturedBy") or e.owner)
     e.status = "draft"
+    delete_embedding(db, e.id)
     audit(db, user, "expertise.reject", "expertise", e.id)
     return _save(db, e)
 
@@ -213,6 +232,7 @@ def deprecate_expertise(exp_id: str, user: Profile = Depends(get_current_user), 
     e = _get(db, exp_id)
     require_governor(user)
     e.status = "deprecated"
+    delete_embedding(db, e.id)
     audit(db, user, "expertise.deprecate", "expertise", e.id)
     return _save(db, e)
 

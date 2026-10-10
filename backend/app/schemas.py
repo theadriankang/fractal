@@ -259,6 +259,25 @@ class HealthOut(CamelModel):
 # Chat-stream schemas (Claude chat backend — from origin/main)
 # ===========================================================================
 
+# --- Expertise match (semantic retrieval) ------------------------------------
+class ExpertiseMatchRequest(BaseModel):
+    query: str
+    attached_ids: list[str] = Field(default_factory=list)
+    limit: int = 3
+
+
+class ExpertiseMatchItem(BaseModel):
+    id: str
+    name: str
+    version: str
+    score: float
+    reason: str
+
+
+# ===========================================================================
+# Chat-stream schemas (Claude chat backend — from origin/main)
+# ===========================================================================
+
 class ChatTurn(BaseModel):
     role: Literal["user", "assistant"]
     content: str

@@ -1,13 +1,16 @@
 import json
 
 import anthropic
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
 from .. import files
+from ..db import get_db
 from ..llm import claude, registry
+from ..models import Expertise
 from ..prompts import build_system_prompt
-from ..schemas import ChatStreamRequest
+from ..schemas import ChatStreamRequest, ExpertiseIn
 
 router = APIRouter(prefix="/api")
 
@@ -44,11 +47,14 @@ def models():
 
 
 @router.post("/chat/stream")
-async def chat_stream(req: ChatStreamRequest):
+async def chat_stream(req: ChatStreamRequest, db: Session = Depends(get_db)):
     """Streams one model's answer as Server-Sent Events: meta, delta*, then done or error.
 
     Accepts any available model id from the catalogue plus "auto"
     (resolves to claude-sonnet for now).
+
+    Chat safety: Expertise is loaded from the database by id (approved only)
+    instead of trusting the content the browser sends.
     """
     is_auto = req.model == "auto"
     resolved_id = registry.resolve_auto(req.model)
@@ -63,7 +69,22 @@ async def chat_stream(req: ChatStreamRequest):
         raise HTTPException(400, "The conversation must end with a user message.")
 
     # Only approved Expertise may reach a model prompt (PROJECT_CONTEXT rule 4).
-    applied = [e for e in req.expertise if e.status == "approved"]
+    # Load from the database by id — never trust browser-sent content.
+    exp_ids = [e.id for e in req.expertise if e.id]
+    applied: list[ExpertiseIn] = []
+    if exp_ids:
+        rows = db.query(Expertise).filter(
+            Expertise.id.in_(exp_ids), Expertise.status == "approved"
+        ).all()
+        applied = [
+            ExpertiseIn(
+                id=e.id, name=e.name, version=e.version, status=e.status,
+                owner=e.owner or "", whenToUse=e.when_to_use or "",
+                knowledge=e.knowledge or [], decisionLogic=e.decision_logic or [],
+                guardrails=e.guardrails or [], escalation=e.escalation or [],
+            )
+            for e in rows
+        ]
     system = build_system_prompt(
         applied,
         model_display_name=entry.display_name,

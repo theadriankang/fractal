@@ -15,6 +15,7 @@ from ..auth import get_current_user, require_contributor, require_reviewer_for
 from ..db import get_db
 from ..governance import add_version, apply_changes, audit, bump_version, one_expertise_out, proposal_to_out, snapshot
 from ..models import Expertise, Profile, Proposal
+from ..retrieval.index import index_expertise
 from ..schemas import ExpertiseOut, ProposalCreate, ProposalOut
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
@@ -79,6 +80,9 @@ def approve_proposal(pid: str, user: Profile = Depends(get_current_user), db: Se
     audit(db, user, "proposal.approve", "proposal", p.id, expertiseId=e.id, version=e.version)
     db.commit()
     db.refresh(e)
+    # Re-index the embedding if the Expertise is approved.
+    if e.status == "approved":
+        index_expertise(db, e)
     return one_expertise_out(db, e)
 
 

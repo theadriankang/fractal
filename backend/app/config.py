@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     extraction_threshold: float = 0.6  # below this confidence, nothing is proposed
     extraction_min_words: int = 12  # skip short messages (questions, small talk)
 
+    # Expertise retrieval (embeddings)
+    embedding_provider: str = "local"  # "local" (fastembed) or "litellm"
+    embedding_model: str = ""  # for litellm, e.g. "text-embedding-3-small"
+    retrieval_min_score: float = 0.35
+
     # CORS
     cors_origins: list[str] = ["http://localhost:5173"]
 
