@@ -125,6 +125,9 @@ def create_expertise(
 
 # Content and metadata edits. Status and version change only through the actions below.
 _GOVERNED = {"status", "version", "reviewer", "usage_count", "success_rate"}
+# The governed body of an Expertise. Once it is live, these change only through a reviewed proposal
+# (the edit page sends them as a revision; summary and "when to use" stay directly editable).
+_CONTENT = {"knowledge", "decision_logic", "guardrails", "escalation"}
 
 
 @router.patch("/expertise/{exp_id}", response_model=ExpertiseOut)
@@ -139,6 +142,13 @@ def patch_expertise(
     for k in _GOVERNED:
         data.pop(k, None)
     _contributor_or_reviewer(user, e.domain)
+    if e.status == "approved":
+        changed = sorted(k for k in _CONTENT & data.keys() if data[k] != getattr(e, k))
+        if changed:
+            raise HTTPException(
+                status_code=409,
+                detail="Live Expertise can't be edited directly. Propose a revision so a reviewer can approve it.",
+            )
     if "domain" in data:
         _contributor_or_reviewer(user, data["domain"])
     for k, v in data.items():

@@ -149,6 +149,7 @@ async def stream_reply(
             api_key=settings.hunyuan_api_key,
             api_base=settings.hunyuan_base_url,
             stream=True,
+            max_tokens=settings.max_output_tokens,
         )
     else:
         # OpenRouter via LiteLLM.
@@ -159,6 +160,9 @@ async def stream_reply(
             messages=[{"role": "system", "content": system}, *messages],
             api_key=settings.openrouter_api_key,
             stream=True,
+            # Without a cap OpenRouter reserves the model's full output budget (e.g. 65k tokens)
+            # against the key's credit limit and rejects the request.
+            max_tokens=settings.max_output_tokens,
         )
 
     response = await litellm.acompletion(**kwargs)

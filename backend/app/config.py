@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     # CORS (env: CORS_ORIGINS='["https://fractal.vercel.app"]' or a comma-separated list)
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Longest answer a non-Claude model may write (tokens).
+    max_output_tokens: int = 4096
+
     # Public demo protection (backend/app/guard.py). Empty / 0 = off.
     access_code: str = ""
     rate_limit_per_minute: int = 0

@@ -28,3 +28,26 @@ app.include_router(proposals.router)
 app.include_router(responses.router)
 app.include_router(capture.router)
 app.include_router(audit.router)
+
+
+@app.on_event("startup")
+def _repair_search_index() -> None:
+    """Re-embed any approved Expertise missing from the search index, in the background."""
+    import logging
+    import threading
+
+    def run():
+        from .db import SessionLocal
+        from .retrieval.index import sync_missing
+
+        db = SessionLocal()
+        try:
+            n = sync_missing(db)
+            if n:
+                logging.getLogger(__name__).info("Search index repaired: %d Expertise re-embedded", n)
+        except Exception as exc:  # never block or crash startup
+            logging.getLogger(__name__).warning("Search index repair skipped: %s", exc)
+        finally:
+            db.close()
+
+    threading.Thread(target=run, daemon=True).start()

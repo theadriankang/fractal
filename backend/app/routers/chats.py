@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..auth import get_current_user
 from ..db import get_db
-from ..models import Chat, Message, Response, Profile, Expertise, Proposal
+from ..models import AuditLog, Chat, Message, Response, Profile, Expertise, Proposal
 from ..schemas import ChatCreate, ChatOut, ChatPatch, MessageCreate, MessageOut, ResponseOut
 from ..governance import audit
 
@@ -232,9 +232,18 @@ def get_chat(
         # Audit: a non-owner opened someone else's conversation.
         owner = db.get(Profile, chat.user_id)
         owner_name = owner.name if owner else None
-        audit(db, user, "chat.view_source", "chat", chat_id,
-              owner_id=chat.user_id, owner_name=owner_name)
-        db.commit()
+        # One entry per person per conversation per 10 minutes, so reloads don't flood the log.
+        recent = (
+            db.query(AuditLog.id)
+            .filter(AuditLog.action == "chat.view_source", AuditLog.target_id == chat_id,
+                    AuditLog.actor == user.id,
+                    AuditLog.at >= datetime.now(timezone.utc) - timedelta(minutes=10))
+            .first()
+        )
+        if not recent:
+            audit(db, user, "chat.view_source", "chat", chat_id,
+                  owner_id=chat.user_id, owner_name=owner_name)
+            db.commit()
         return _chat_to_out(chat, owner_id=chat.user_id, owner_name=owner_name)
 
     return _chat_to_out(chat, owner_id=user.id, owner_name=user.name)

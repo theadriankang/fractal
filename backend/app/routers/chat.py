@@ -1,5 +1,7 @@
 import json
 
+import logging
+
 import anthropic
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -11,6 +13,22 @@ from ..llm import claude, registry
 from ..models import Expertise
 from ..prompts import build_system_prompt
 from ..schemas import ChatStreamRequest, ExpertiseIn
+
+logger = logging.getLogger(__name__)
+
+
+def _friendly_error(model_id: str, e: Exception) -> str:
+    text = str(e).lower()
+    if "credit" in text or "afford" in text or "402" in text:
+        return f"{model_id} is out of credit on OpenRouter. Try another model or top up the key."
+    if "not a valid model" in text or "deprecated" in text or "notfound" in text:
+        return f"{model_id} isn't available from the provider right now. Try another model."
+    if "rate" in text and "limit" in text:
+        return f"{model_id} is busy (provider rate limit). Try again in a moment."
+    if "timeout" in text or "timed out" in text:
+        return f"{model_id} took too long to respond. Try again."
+    return f"{model_id} couldn't answer this time. Try again or pick another model."
+
 
 router = APIRouter(prefix="/api")
 
@@ -112,7 +130,9 @@ async def chat_stream(req: ChatStreamRequest, db: Session = Depends(get_db)):
             yield sse("error", {"message": "The backend could not reach the Claude API."})
         except Exception as e:
             # Catch-all so provider errors become an error event, never a crash.
-            yield sse("error", {"message": f"{entry.id} request failed: {e}"})
+            # Show a short, readable reason; the full error goes to the server log.
+            logger.warning("%s request failed: %s", entry.id, e)
+            yield sse("error", {"message": _friendly_error(entry.id, e)})
 
     return StreamingResponse(
         events(),
