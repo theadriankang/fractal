@@ -6,15 +6,26 @@ doesn't — the front end's demo sign-in (src/pages/Login.jsx) doesn't call Supa
 yet, so both paths stay supported until that migration ships. Once every request carries
 a verified JWT, the header fallback becomes dead code safe to delete.
 
+Supabase projects created with the newer "JWT signing keys" setup (Settings -> API ->
+JWT Keys) sign access tokens asymmetrically (ES256, occasionally RS256) with a key that
+rotates; there is no shared secret to copy for these, so we verify against the project's
+public JWKS instead (fetched from ``<SUPABASE_URL>/auth/v1/.well-known/jwks.json`` and
+cached by ``kid``). Older projects that still sign with the legacy shared HS256 secret
+(``SUPABASE_JWT_SECRET``) are supported too — the algorithm in the token's own header
+picks which path we use, since a token never carries a shared secret in it.
+
 SECURITY NOTE: the header fallback trusts whatever the client sends with no verification —
 anyone who can reach the API can claim to be any profile id. It exists only so the current
 front end keeps working; it must not be relied on once this is public with real user data.
 """
 
 import logging
+import ssl
 
+import certifi
 import jwt
 from fastapi import Depends, Header, HTTPException, status
+from jwt import PyJWKClient
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -24,21 +35,65 @@ from .models import Profile
 
 logger = logging.getLogger(__name__)
 
+# Cached lazily so we only hit the network the first time a JWKS-signed (ES256/RS256)
+# token shows up, and PyJWKClient itself caches individual keys by kid after that.
+_jwks_client: PyJWKClient | None = None
+
+# PyJWKClient fetches the JWKS with urllib, which defaults to the OS trust store. That's
+# missing or incomplete on a lot of machines (python.org installs on macOS that skipped
+# "Install Certificates.command", slim Docker images on Cloud Run), which fails as an opaque
+# "unable to get local issuer certificate" — not a token problem, just no CA bundle to check
+# against. Pointing it at certifi's bundled-with-pip CA bundle sidesteps the OS store entirely,
+# so this works the same in a fresh venv, in CI and in the container we deploy.
+_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+
+
+def _get_jwks_client() -> PyJWKClient | None:
+    global _jwks_client
+    if _jwks_client is None and settings.supabase_url:
+        jwks_url = settings.supabase_url.rstrip("/") + "/auth/v1/.well-known/jwks.json"
+        _jwks_client = PyJWKClient(jwks_url, cache_keys=True, lifespan=3600, ssl_context=_SSL_CONTEXT)
+    return _jwks_client
+
 
 def _verify_jwt(token: str) -> str | None:
     """Returns the Supabase user id (the ``sub`` claim) for a validly signed, unexpired
-    JWT, or None if it's missing, malformed, expired, or signed with the wrong secret."""
-    if not settings.supabase_jwt_secret:
-        return None
+    JWT, or None if it's missing, malformed, expired, or fails verification.
+
+    Picks the verification path from the token's own ``alg`` header: ES256/RS256 (the
+    current Supabase default) is checked against the project's JWKS; HS256 (legacy
+    projects) against ``SUPABASE_JWT_SECRET``. Never trusts the header's ``alg`` beyond
+    that routing decision — ``jwt.decode`` is always given an explicit allow-list.
+    """
     try:
-        payload = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
+        alg = jwt.get_unverified_header(token).get("alg")
+    except jwt.InvalidTokenError as exc:
+        logger.warning("rejected a malformed bearer token: %s", exc)
+        return None
+
+    try:
+        if alg in ("ES256", "RS256"):
+            client = _get_jwks_client()
+            if client is None:
+                return None
+            signing_key = client.get_signing_key_from_jwt(token)
+            payload = jwt.decode(
+                token, signing_key.key, algorithms=["ES256", "RS256"], audience="authenticated",
+            )
+        elif alg == "HS256":
+            if not settings.supabase_jwt_secret:
+                return None
+            payload = jwt.decode(
+                token, settings.supabase_jwt_secret, algorithms=["HS256"], audience="authenticated",
+            )
+        else:
+            logger.warning("rejected a bearer token with unsupported alg %r", alg)
+            return None
     except jwt.InvalidTokenError as exc:
         logger.warning("rejected an invalid bearer token: %s", exc)
+        return None
+    except Exception as exc:  # JWKS fetch/network errors, etc. — never raise into the caller.
+        logger.warning("bearer token verification failed: %s", exc)
         return None
     return payload.get("sub")
 

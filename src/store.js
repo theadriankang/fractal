@@ -7,7 +7,8 @@ import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto, routeAutoWithFallback, makeAvailabilityChecker, getModel } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
 import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend, routeAutoBackend, refreshLiveModels, getModelAvailability } from './lib/api'
-import { DEMO_USERS, authenticate, userById } from './data/users'
+import { DEMO_USERS, signIn, userById } from './data/users'
+import { supabase, hasSupabase } from './lib/supabase'
 import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit, deleteBlock } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
 import { readiness } from './lib/readiness'
@@ -15,6 +16,9 @@ import { helpfulStats, responseKey, upsertFeedback } from './lib/ratings'
 
 const uid = (p = 'id') => `${p}-${Math.random().toString(36).slice(2, 9)}`
 const now = () => new Date().toISOString()
+// Attaches this account's current Supabase access token (if any), so src/lib/api.js can send
+// a real `Authorization: Bearer` header instead of the old unverified X-User-Email header.
+const withToken = (u, tokens) => (u ? { ...u, accessToken: tokens?.[u.id]?.accessToken } : u)
 const snapshot = (e) => Object.fromEntries(CONTENT_FIELDS.map((f) => [f, structuredClone(e[f])]))
 
 const bumpVersion = (v) => {
@@ -186,7 +190,9 @@ export const useStore = create(
       // Signed-in account (src/data/users.js); null on the sign-in page. Role + domains drive src/lib/permissions.js.
       user: null,
       // Like Claude: several accounts can be signed in on this device; one is active.
-      session: { activeId: null, signedIn: [] },
+      // tokens: { [accountId]: { accessToken, refreshToken } } — the real Supabase session
+      // per signed-in account, read by src/lib/api.js to authenticate backend requests.
+      session: { activeId: null, signedIn: [], tokens: {} },
       selectedModels: ['auto'],
 
       // ---------------- ui (not persisted) ----------------
@@ -218,27 +224,50 @@ export const useStore = create(
           },
         })),
       // ---------------- accounts (simulated auth) ----------------
-      login: (email, password) => {
-        const u = authenticate(email, password)
-        if (!u) return { error: 'Incorrect email or password.' }
-        set((s) => ({ user: u, session: { activeId: u.id, signedIn: [...new Set([...(s.session?.signedIn || []), u.id])] } }))
+      login: async (email, password) => {
+        const res = await signIn(email, password)
+        if (res.error) return { error: res.error }
+        const { user: u, session: sbSession } = res
+        const tokens = { ...get().session?.tokens }
+        if (sbSession) tokens[u.id] = { accessToken: sbSession.access_token, refreshToken: sbSession.refresh_token }
+        set((s) => ({
+          user: withToken(u, tokens),
+          session: { activeId: u.id, signedIn: [...new Set([...(s.session?.signedIn || []), u.id])], tokens },
+        }))
         return { user: u }
       },
-      switchAccount: (id) => {
+      switchAccount: async (id) => {
         const u = userById(id)
         if (!u || !get().session.signedIn.includes(id)) return
-        set((s) => ({ user: u, session: { ...s.session, activeId: id } }))
+        const tokens = { ...get().session.tokens }
+        const saved = tokens[id]
+        // Put this account's session back on the shared Supabase client (Meeting Recorder,
+        // and anything else using `supabase` directly, should act as whoever is now active).
+        if (hasSupabase && saved) {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: saved.accessToken, refresh_token: saved.refreshToken,
+          })
+          if (error) {
+            // Session expired and couldn't refresh — drop it; API calls fall back to X-User-Email.
+            delete tokens[id]
+          } else if (data.session) {
+            tokens[id] = { accessToken: data.session.access_token, refreshToken: data.session.refresh_token }
+          }
+        }
+        set((s) => ({ user: withToken(u, tokens), session: { ...s.session, activeId: id, tokens } }))
         get().showToast(`Switched to ${u.name}`)
       },
       // Signs out the active account; falls back to another signed-in account, else the sign-in page.
       logout: () => {
         const { session } = get()
         const signedIn = session.signedIn.filter((id) => id !== session.activeId)
+        const tokens = { ...session.tokens }
+        delete tokens[session.activeId]
         const next = userById(signedIn[0])
-        set({ user: next, session: { activeId: next?.id || null, signedIn } })
+        set({ user: withToken(next, tokens), session: { activeId: next?.id || null, signedIn, tokens } })
         return next
       },
-      logoutAll: () => set({ user: null, session: { activeId: null, signedIn: [] } }),
+      logoutAll: () => set({ user: null, session: { activeId: null, signedIn: [], tokens: {} } }),
 
       setSelectedModels: (ids) => set({ selectedModels: ids.length ? ids : ['auto'] }),
 
@@ -857,9 +886,9 @@ export const useStore = create(
       onRehydrateStorage: () => (state) => {
         if (!state) return
         // The active account comes from the session only; no session → sign-in page.
-        const session = state.session?.signedIn ? state.session : { activeId: null, signedIn: [] }
-        state.session = { ...session, signedIn: session.signedIn.filter((id) => userById(id)) }
-        state.user = userById(state.session.activeId)
+        const session = state.session?.signedIn ? state.session : { activeId: null, signedIn: [], tokens: {} }
+        state.session = { ...session, signedIn: session.signedIn.filter((id) => userById(id)), tokens: session.tokens || {} }
+        state.user = withToken(userById(state.session.activeId), state.session.tokens)
         state.chats = state.chats.map((c) => ({
           ...c,
           messages: c.messages.map((m) => {

@@ -8,7 +8,8 @@ psycopg[binary]>=3.2.3
 pydantic>=2.9.2
 pydantic-settings==2.15.0
 python-dotenv>=1.0.1
-pyjwt>=2.9.0
+pyjwt[crypto]>=2.9.0
+certifi>=2024.8.30  # JWKS fetch in app/auth.py uses this CA bundle explicitly — see its comment
 
 # --- Supabase Admin API (for seed.py creating demo users) ---
 supabase>=2.7.4
