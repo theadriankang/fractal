@@ -86,7 +86,7 @@ function Section({ title, icon, children, collapsible = false }) {
 
 export default function Sidebar() {
   const navigate = useNavigate()
-  const { chats, toggleSidebar, newChat, openSettings, user, session, switchAccount, logout, logoutAll, resetDemo } = useStore()
+  const { chats, toggleSidebar, openSettings, user, session, switchAccount, logout, logoutAll, resetDemo } = useStore()
   const signedIn = session.signedIn.map(userById).filter(Boolean)
   const pending = useStore(reviewCount)
   const [q, setQ] = useState('')
@@ -119,7 +119,7 @@ export default function Sidebar() {
       <div className="space-y-0.5 px-2 pt-2">
         <button
           className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-850"
-          onClick={() => navigate(`/c/${newChat()}`)}
+          onClick={() => navigate('/')}
         >
           <SquarePen size={17} /> New Chat
         </button>

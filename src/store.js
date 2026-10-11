@@ -917,15 +917,20 @@ export const useStore = create(
         const session = state.session?.signedIn ? state.session : { activeId: null, signedIn: [], tokens: {} }
         state.session = { ...session, signedIn: session.signedIn.filter((id) => userById(id)), tokens: session.tokens || {} }
         state.user = withToken(userById(state.session.activeId), state.session.tokens)
-        state.chats = state.chats.map((c) => ({
-          ...c,
-          messages: c.messages.map((m) => {
-            if (!m.responses) return m
-            const out = { ...m, responses: m.responses.map((r) => ({ ...r, streaming: false })) }
-            // a capture check interrupted by a reload is simply dropped
-            return out.detectionState === 'checking' ? { ...out, detectionState: null } : out
-          }),
-        }))
+        state.chats = state.chats
+          // Drop empty chats left over from before "New Chat" stopped pre-creating an entry
+          // (it now only navigates home; ChatPage creates the chat lazily on the first message),
+          // and from any stray case that still manages to leave one with nothing in it.
+          .filter((c) => c.messages.length > 0)
+          .map((c) => ({
+            ...c,
+            messages: c.messages.map((m) => {
+              if (!m.responses) return m
+              const out = { ...m, responses: m.responses.map((r) => ({ ...r, streaming: false })) }
+              // a capture check interrupted by a reload is simply dropped
+              return out.detectionState === 'checking' ? { ...out, detectionState: null } : out
+            }),
+          }))
       },
     },
   ),
