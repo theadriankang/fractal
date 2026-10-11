@@ -20,6 +20,7 @@ def health():
         status="ok" if all_ok else "degraded",
         database="connected" if db_ok else "disconnected",
         claude="configured" if claude_ok else "not_configured",
+        transcribe=settings.transcribe,
     )
 
 

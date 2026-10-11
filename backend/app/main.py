@@ -31,6 +31,16 @@ app.include_router(audit.router)
 
 
 @app.on_event("startup")
+def _prewarm_jwks() -> None:
+    """Fetch Supabase's JWKS once at startup, off the request path (see auth.prewarm_jwks)."""
+    import threading
+
+    from .auth import prewarm_jwks
+
+    threading.Thread(target=prewarm_jwks, daemon=True).start()
+
+
+@app.on_event("startup")
 def _repair_search_index() -> None:
     """Re-embed any approved Expertise missing from the search index, in the background."""
     import logging

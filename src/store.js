@@ -16,6 +16,12 @@ import { helpfulStats, responseKey, upsertFeedback } from './lib/ratings'
 
 const uid = (p = 'id') => `${p}-${Math.random().toString(36).slice(2, 9)}`
 const now = () => new Date().toISOString()
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+// loadFromBackend() in-flight dedupe, keyed by user id. React StrictMode (src/main.jsx) mounts
+// Shell's effect twice on a fresh sign-in, which would otherwise fire two concurrent loads —
+// each racing the backend's own cold-start cost (e.g. the first JWKS fetch for a just-restarted
+// server) at once. A second call for the same user piggybacks on the first's promise instead.
+let _loadFromBackendInFlight = null
 // Attaches this account's current Supabase access token (if any), so src/lib/api.js can send
 // a real `Authorization: Bearer` header instead of the old unverified X-User-Email header.
 const withToken = (u, tokens) => (u ? { ...u, accessToken: tokens?.[u.id]?.accessToken } : u)
@@ -301,13 +307,18 @@ export const useStore = create(
       },
 
       // Loads the signed-in account's chats, the Library and the open Review Queue from Supabase.
+      // One retry after a short pause absorbs a cold-start hiccup (e.g. the backend's first-ever
+      // JWKS fetch after a restart) instead of stranding dataSource on 'local' from a blip that
+      // a moment later would have succeeded on its own.
       loadFromBackend: async ({ quiet = false } = {}) => {
         const user = get().user
         if (USE_MOCK || !user) return
-        try {
+        if (_loadFromBackendInFlight?.userId === user.id) return _loadFromBackendInFlight.promise
+
+        const attempt = async () => {
           const api = apiFor(user)
           const [chats, expertise, proposals] = await Promise.all([api.listChats(), api.listExpertise(), api.listProposals()])
-          if (get().user?.id !== user.id) return // switched account while loading
+          if (get().user?.id !== user.id) return true // switched account while loading
           const local = get().chats
           const saved = new Set(chats.map((c) => c.id))
           // Keep answers still streaming (saved when they finish) and empty drafts not yet saved.
@@ -324,14 +335,31 @@ export const useStore = create(
             proposals,
           })
           return true
-        } catch (err) {
-          set({ dataSource: 'local' })
-          if (!quiet)
-            get().showToast(err.status === 0
-              ? 'Backend offline — using local demo data. Start it (see backend/README.md) or set VITE_USE_MOCK=true.'
-              : `Couldn't load from Supabase (${err.message}) — using local demo data.`)
-          return false
         }
+
+        const run = (async () => {
+          try {
+            return await attempt()
+          } catch (firstErr) {
+            await sleep(1200)
+            if (get().user?.id !== user.id) return false // switched/signed out while waiting
+            try {
+              return await attempt()
+            } catch (err) {
+              set({ dataSource: 'local' })
+              if (!quiet)
+                get().showToast(err.status === 0
+                  ? 'Backend offline — using local demo data. Start it (see backend/README.md) or set VITE_USE_MOCK=true.'
+                  : `Couldn't load from Supabase (${err.message}) — using local demo data.`)
+              return false
+            }
+          } finally {
+            if (_loadFromBackendInFlight?.userId === user.id) _loadFromBackendInFlight = null
+          }
+        })()
+
+        _loadFromBackendInFlight = { userId: user.id, promise: run }
+        return run
       },
 
       // ---------------- chats ----------------
