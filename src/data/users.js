@@ -8,6 +8,8 @@
 //          'intern'      — Uses approved Expertise in chat and reads it; cannot contribute or review.
 // domains: taxonomy domains (src/data/taxonomy.js) the person is a recognised expert in.
 
+import { supabase, hasSupabase } from '../lib/supabase'
+
 export const DEMO_PASSWORD = 'demo1234'
 
 export const DEMO_USERS = [
@@ -32,10 +34,30 @@ export const roleSummary = (u) =>
     : u.role === 'intern' ? 'Intern · uses Expertise, read-only'
       : `Expert · ${u.domains.join(', ')}`
 
-/** Simulated credential check. Returns the account or null. */
-export function authenticate(email, password) {
-  const u = DEMO_USERS.find((x) => x.email.toLowerCase() === String(email).trim().toLowerCase())
-  return u && password === DEMO_PASSWORD ? u : null
+/**
+ * Signs in against real Supabase Auth (backend/seed.py creates one Supabase Auth user + matching
+ * `profiles` row per account above, same password). Returns the matched demo account (display
+ * metadata) plus the real Supabase session, whose access token the backend verifies on every
+ * request (backend/app/auth.py) instead of the old unverified X-User-Email header.
+ *
+ * Falls back to a local password check when Supabase isn't configured, or rejects the login
+ * attempt, so the front end's demo sign-in still works offline / before `python seed.py` has
+ * run (rule 7 in docs/PROJECT_CONTEXT.md: always keep a mock fallback). `session` is null in
+ * that fallback case — src/lib/api.js then falls back to the old X-User-Email header.
+ */
+export async function signIn(email, password) {
+  const account = DEMO_USERS.find((x) => x.email.toLowerCase() === String(email).trim().toLowerCase())
+  if (!account) return { error: 'Incorrect email or password.' }
+
+  if (hasSupabase) {
+    const { data, error } = await supabase.auth.signInWithPassword({ email: account.email, password })
+    if (!error) return { user: account, session: data.session }
+    if (password !== DEMO_PASSWORD) return { error: 'Incorrect email or password.' }
+    console.warn('[auth] Supabase sign-in failed, falling back to local demo check:', error.message)
+  } else if (password !== DEMO_PASSWORD) {
+    return { error: 'Incorrect email or password.' }
+  }
+  return { user: account, session: null }
 }
 
 /** Upgrades a saved `{name, role}` user (older demo state) to a full account. */

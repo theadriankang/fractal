@@ -52,13 +52,13 @@ export default function Login() {
   const finish = (e, p, id) => {
     setError(null)
     setBusy(id || 'form')
-    // A short beat so the click registers before the app swaps in.
-    setTimeout(() => {
-      const res = login(e, p)
+    // login() calls Supabase Auth, so this is a real network round-trip now, not a simulated delay.
+    ;(async () => {
+      const res = await login(e, p)
       setBusy(null)
       if (res.error) { setError(res.error); return }
       navigate(location.state?.from || '/', { replace: true })
-    }, 250)
+    })()
   }
   const submit = (ev) => {
     ev.preventDefault()

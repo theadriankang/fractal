@@ -262,10 +262,16 @@ export class ApiError extends Error {
 
 async function request(user, method, path, body) {
   let res
+  // Prefers a real, verified Supabase session (backend/app/auth.py checks the signature);
+  // falls back to the old unverified X-User-Email header when there's no session yet
+  // (Supabase not configured, or `python seed.py` hasn't created the demo accounts there).
+  const authHeaders = user?.accessToken
+    ? { Authorization: `Bearer ${user.accessToken}` }
+    : user?.email ? { 'X-User-Email': user.email } : {}
   try {
     res = await apiFetch(`/api${path}`, {
       method,
-      headers: { 'Content-Type': 'application/json', ...(user?.email ? { 'X-User-Email': user.email } : {}) },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch {
