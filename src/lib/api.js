@@ -162,6 +162,28 @@ export async function matchExpertiseBackend(query, attachedIds = [], limit = 3) 
   }
 }
 
+/**
+ * POST /api/route — Smart Auto routing. An LLM call classifies the prompt
+ * (coding / analytical / long-document / operational / writing / ...) and
+ * returns the model best suited to it, falling back to keyword rules
+ * server-side if the classifier is slow or Claude isn't configured.
+ * Returns {modelId, category, reason, source} or null if the backend is offline.
+ */
+export async function routeAutoBackend(prompt) {
+  if (USE_MOCK) return null
+  try {
+    const res = await apiFetch('/api/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
 // The Expertise fields the backend's system prompt uses.
 const EXPERTISE_FIELDS = ['id', 'name', 'version', 'status', 'owner', 'whenToUse', 'knowledge', 'decisionLogic', 'guardrails', 'escalation']
 const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, e[f]]))
