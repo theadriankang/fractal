@@ -255,6 +255,7 @@ class HealthOut(CamelModel):
     status: str
     database: str
     claude: str
+    transcribe: str  # active TRANSCRIBE backend (app/config.py) — "browser" is the only one implemented
 
 
 # ===========================================================================

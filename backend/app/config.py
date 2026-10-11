@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     embedding_model: str = ""  # for litellm, e.g. "text-embedding-3-small"
     retrieval_min_score: float = 0.35
 
+    # Meeting Recorder transcription backend (src/hooks/useMeetingRecorder.js).
+    # TODO: only "browser" (the Web Speech API, client-side) is implemented. "tencent-asr" and
+    # "whisper" are placeholders for a server-side transcription path — swapping one in means
+    # adding a POST /api/meetings/{id}/transcribe that accepts the recorded audio and returns a
+    # transcript, and having the front end call it instead of (or as a fallback for) SpeechRecognition.
+    transcribe: str = "browser"  # "browser" | "tencent-asr" | "whisper"
+
     # CORS (env: CORS_ORIGINS='["https://fractal.vercel.app"]' or a comma-separated list)
     cors_origins: list[str] = ["http://localhost:5173"]
 

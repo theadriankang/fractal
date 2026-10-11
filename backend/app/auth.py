@@ -56,6 +56,26 @@ def _get_jwks_client() -> PyJWKClient | None:
     return _jwks_client
 
 
+def prewarm_jwks() -> None:
+    """Fetch and cache the JWKS once, eagerly, instead of waiting for the first real request.
+
+    Without this, the first sign-in after a backend restart pays for the JWKS network round
+    trip (and, under React StrictMode, several *concurrent* requests all pay for it at once,
+    since the lazily-created client isn't populated yet) inline with the user's own request —
+    slow enough on a cold connection to occasionally time out or error, which the front end
+    then (correctly, but confusingly) reports as "couldn't load from Supabase" even though a
+    retry a moment later succeeds once the key is cached. Called from main.py's startup hook,
+    in a background thread so a slow or unreachable JWKS endpoint never delays startup itself.
+    """
+    client = _get_jwks_client()
+    if client is None:
+        return
+    try:
+        client.get_jwk_set()  # populates PyJWKClient's own key cache; return value unused here
+    except Exception as exc:  # network hiccup at startup — the lazy path on first request still works
+        logger.warning("JWKS prewarm failed (will retry lazily on first request): %s", exc)
+
+
 def _verify_jwt(token: str) -> str | None:
     """Returns the Supabase user id (the ``sub`` claim) for a validly signed, unexpired
     JWT, or None if it's missing, malformed, expired, or fails verification.
