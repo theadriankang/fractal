@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 from .. import files
 from ..db import get_db
 from ..llm import claude, registry
+from ..llm import router as auto_router
 from ..models import Expertise
 from ..prompts import build_system_prompt
-from ..schemas import ChatStreamRequest, ExpertiseIn
+from ..schemas import ChatStreamRequest, ExpertiseIn, RouteOut, RouteRequest
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,30 @@ def models():
         {"id": e.id, "provider": e.provider, "available": registry.is_available(e)}
         for e in registry.all_models()
     ]
+
+
+@router.post("/route", response_model=RouteOut)
+async def route_prompt(req: RouteRequest):
+    """Smart Auto routing: classifies the prompt and returns the best-suited model.
+
+    Tries an LLM classification call first; falls back to keyword rules if the
+    classifier is slow, errors, or Claude isn't configured (see llm/router.py).
+    """
+    if not req.prompt.strip():
+        raise HTTPException(400, "prompt is required")
+    return await auto_router.route(req.prompt)
+
+
+@router.get("/routing")
+def routing_table():
+    """Category -> model table that Auto routing uses (Settings -> Auto routing)."""
+    return {
+        "categories": auto_router.CATEGORIES,
+        "table": [
+            {"category": c, "modelId": m}
+            for c, m in auto_router.CATEGORY_MODEL.items()
+        ],
+    }
 
 
 @router.post("/chat/stream")

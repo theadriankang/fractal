@@ -6,7 +6,7 @@ import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfo
 import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto, routeAutoWithFallback, makeAvailabilityChecker, getModel } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
-import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend, refreshLiveModels, getModelAvailability } from './lib/api'
+import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend, routeAutoBackend, refreshLiveModels, getModelAvailability } from './lib/api'
 import { DEMO_USERS, authenticate, userById } from './data/users'
 import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit, deleteBlock } from './lib/permissions'
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
@@ -367,9 +367,16 @@ export const useStore = create(
           }
         })
 
+        // Smart Auto routing: one LLM call classifies the prompt (coding / analytical /
+        // long-document / operational / writing / ...) and returns the best-suited model.
+        // Falls back to the local keyword router if the backend is offline or times out.
+        const isAvailable = makeAvailabilityChecker(get().modelAvailability)
+        const needsAuto = enabledModels.includes('auto')
+        const autoRoute = needsAuto
+          ? (await routeAutoBackend(text)) || routeAutoWithFallback(text, isAvailable)
+          : null
         const responses = enabledModels.map((mid) => {
-          const isAvailable = makeAvailabilityChecker(get().modelAvailability)
-          const auto = mid === 'auto' ? routeAutoWithFallback(text, isAvailable) : null
+          const auto = mid === 'auto' ? autoRoute : null
           return {
             id: uid('r'),
             modelId: auto ? auto.modelId : mid,

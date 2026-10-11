@@ -309,6 +309,18 @@ class ExpertiseIn(BaseModel):
     escalation: list[str] = []
 
 
+# --- Smart Auto routing -------------------------------------------------------
+class RouteRequest(BaseModel):
+    prompt: str
+
+
+class RouteOut(BaseModel):
+    modelId: str
+    category: str
+    reason: str
+    source: Literal["classifier", "keyword"]
+
+
 class ChatStreamRequest(BaseModel):
     model: str  # front-end model id, e.g. "claude-sonnet"
     messages: list[ChatTurn] = Field(min_length=1, max_length=40)
