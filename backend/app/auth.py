@@ -1,37 +1,84 @@
-"""Auth dependency — stub, plus the role rules from src/lib/permissions.js.
+"""Auth dependency, plus the role rules from src/lib/permissions.js.
 
-Reads the ``X-User-Id`` header (a profile UUID) or, for the front end's demo sign-in, the
-``X-User-Email`` header, and looks up the matching profile.
-Prompt 8 will replace this with Supabase JWT verification.
+Verifies a Supabase JWT when the request carries one (``Authorization: Bearer <token>``),
+and falls back to the unverified ``X-User-Id`` / ``X-User-Email`` header stub when it
+doesn't — the front end's demo sign-in (src/pages/Login.jsx) doesn't call Supabase Auth
+yet, so both paths stay supported until that migration ships. Once every request carries
+a verified JWT, the header fallback becomes dead code safe to delete.
+
+SECURITY NOTE: the header fallback trusts whatever the client sends with no verification —
+anyone who can reach the API can claim to be any profile id. It exists only so the current
+front end keeps working; it must not be relied on once this is public with real user data.
 """
 
+import logging
+
+import jwt
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from .config import settings
 from .db import get_db
 from .models import Profile
+
+logger = logging.getLogger(__name__)
+
+
+def _verify_jwt(token: str) -> str | None:
+    """Returns the Supabase user id (the ``sub`` claim) for a validly signed, unexpired
+    JWT, or None if it's missing, malformed, expired, or signed with the wrong secret."""
+    if not settings.supabase_jwt_secret:
+        return None
+    try:
+        payload = jwt.decode(
+            token,
+            settings.supabase_jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+    except jwt.InvalidTokenError as exc:
+        logger.warning("rejected an invalid bearer token: %s", exc)
+        return None
+    return payload.get("sub")
 
 
 def get_current_user(
     db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_user_email: str | None = Header(default=None, alias="X-User-Email"),
 ) -> Profile:
-    """Return the Profile for the ``X-User-Id`` or ``X-User-Email`` header (stub)."""
-    if x_user_id:
+    """Return the Profile making this request.
+
+    Prefers a verified Supabase JWT. Falls back to the unverified ``X-User-Id`` /
+    ``X-User-Email`` headers only when no bearer token is presented (see module docstring).
+    """
+    verified_user_id = None
+    if authorization and authorization.lower().startswith("bearer "):
+        verified_user_id = _verify_jwt(authorization[len("bearer "):].strip())
+        if verified_user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired session token.",
+            )
+
+    if verified_user_id:
+        profile = db.get(Profile, verified_user_id)
+    elif x_user_id:
         profile = db.get(Profile, x_user_id)
     elif x_user_email:
         profile = db.query(Profile).filter(func.lower(Profile.email) == x_user_email.strip().lower()).first()
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing X-User-Id or X-User-Email header",
+            detail="Missing Authorization, X-User-Id or X-User-Email header",
         )
     if not profile:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No profile for user {x_user_id or x_user_email}. Run backend/seed.py to create the demo accounts.",
+            detail=f"No profile for user {verified_user_id or x_user_id or x_user_email}. "
+                   f"Run backend/seed.py to create the demo accounts.",
         )
     return profile
 

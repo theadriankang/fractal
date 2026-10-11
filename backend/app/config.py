@@ -25,8 +25,10 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_role_key: str = ""
 
-    # Auth (stub — Prompt 8 replaces with Supabase JWT verification)
-    auth_header_name: str = "x-user-id"
+    # Auth: verifies a Supabase JWT when the front end sends one (Authorization: Bearer <token>).
+    # Project Settings -> API -> JWT Secret. Empty = JWT verification is skipped and every
+    # request falls back to the unverified X-User-Id / X-User-Email header (see app/auth.py).
+    supabase_jwt_secret: str = ""
 
     # Anthropic / Claude chat
     anthropic_api_key: str = ""
