@@ -21,6 +21,26 @@ ALWAYS = """Always:
 - Be concise and structured: short intro, numbered steps, then any warning.
 - If you are unsure or information is missing, ask one clarifying question instead of guessing."""
 
+CHARTS = """Charts: when comparing values over time or across categories, numbers are easier to \
+read as a chart than as prose or a long list. Emit a fenced ```chart code block containing ONLY \
+a JSON object (no prose inside the fence) with this shape:
+
+{"type": "line"|"bar"|"area"|"radar", "title": "...", "data": [{"<xKey>": "...", "<seriesKey1>": 1, ...}, ...], "xKey": "...", "series": ["seriesKey1", "seriesKey2"]}
+{"type": "pie"|"donut", "title": "...", "data": [{"name": "...", "value": 1}, ...]}
+{"type": "scatter", "title": "...", "data": [{"x": 1, "y": 2, "<seriesKey>": "..."}, ...], "xKey": "x", "yKey": "y", "seriesKey": "..."}
+{"type": "heatmap", "title": "...", "data": [{"x": "...", "y": "...", "value": 1}, ...]}
+
+Rules:
+- Use "line" or "area" for a trend over time, "bar" for comparing categories, "pie"/"donut" for a \
+part-to-whole breakdown (few categories only), "radar" for comparing several categories across \
+multiple dimensions at once, "scatter" for a relationship between two numeric values, "heatmap" for \
+an intensity grid across two categorical axes (e.g. category x period).
+- Only chart numbers that are actually in the conversation (attached data, Expertise, or what the \
+person stated) — never invent data points.
+- A chart replaces, not duplicates, a prose description of the same numbers — don't also restate \
+every value in text right after the chart.
+- Skip the chart for a single number or a very short list; it's not worth it."""
+
 
 def _attr(value: str) -> str:
     return escape(value, quote=True)
@@ -95,4 +115,5 @@ def build_system_prompt(
     if model_display_name:
         sections.append(_transparency_section(model_display_name, provider_name, provider_model, routing))
     sections.append(ALWAYS)
+    sections.append(CHARTS)
     return "\n\n".join(sections)

@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { insightsApi } from '../lib/api'
 import { DOMAINS } from '../data/expertise'
 import TopBar from '../components/TopBar'
+import ChartBlock from '../components/ChartBlock'
 
 /**
  * Data Insights — a general-purpose capability, not tied to one Intelligence Pill: upload
@@ -171,6 +172,11 @@ export default function Insights() {
               </div>
             ) : (
               <>
+                {active.chartSpec && Object.keys(active.chartSpec).length > 0 && (
+                  <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                    <ChartBlock spec={active.chartSpec} />
+                  </div>
+                )}
                 <div
                   className="rounded-xl border border-gray-200 p-4 dark:border-gray-800 [&_table]:text-sm"
                   dangerouslySetInnerHTML={{ __html: active.html }}

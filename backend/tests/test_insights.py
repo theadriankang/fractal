@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
-from app.insights.analysis import AnalysisError, detect_issues, parse_csv
+from app.insights.analysis import AnalysisError, build_chart_spec, detect_issues, parse_csv
 from app.insights.report import render_html
 from app.main import app
 
@@ -76,6 +76,25 @@ def test_detect_issues_returns_at_most_top_n():
     assert len(detect_issues(parsed, top_n=2)) <= 2
 
 
+def test_build_chart_spec_returns_line_series_per_category():
+    parsed = parse_csv(_CSV)
+    spec = build_chart_spec(parsed)
+    assert spec["type"] == "line"
+    assert set(spec["series"]) == set(parsed.categories)
+    assert spec["xKey"] == "period"
+    assert len(spec["data"]) == len(parsed.periods)
+    # Each row keys every series by category, with the parsed value for that period.
+    first = spec["data"][0]
+    assert first["period"] == parsed.periods[0]
+    assert first["Level 12"] == 900.0
+
+
+def test_build_chart_spec_caps_to_max_series():
+    parsed = parse_csv(_CSV)
+    spec = build_chart_spec(parsed, max_series=2)
+    assert len(spec["series"]) <= 2
+
+
 def test_render_html_includes_title_and_flagged_issue():
     parsed = parse_csv(_CSV)
     issues = detect_issues(parsed)
@@ -132,6 +151,15 @@ def test_generate_report_round_trips_and_lists_historically(api_db):
     assert len(report["topIssues"]) > 0
     assert report["topIssues"][0]["category"] == "Level 12"
     assert "Level 12" in report["html"]
+
+    # Every report gets a ready-to-render chart spec (the trend-chart requirement from the
+    # visualization work) -- a line chart of each category's values across periods.
+    spec = report["chartSpec"]
+    assert spec["type"] == "line"
+    assert spec["xKey"] == "period"
+    assert "Level 12" in spec["series"]
+    assert len(spec["data"]) == len(report["rawMetrics"]["periods"])
+    assert spec["data"][0]["period"] == report["rawMetrics"]["periods"][0]
 
     # Historical listing: the generated report shows up (this is the "stores it automatically,
     # building historical data over time" requirement from the webinar notes).

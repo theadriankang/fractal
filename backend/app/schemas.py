@@ -464,6 +464,7 @@ class DataReportOut(CamelModel):
     top_issues: list[IssueOut] = Field(default_factory=list)
     raw_metrics: dict = Field(default_factory=dict)
     narrative: str = ""
+    chart_spec: dict = Field(default_factory=dict)
     expertise_used: list["ExpertiseCitation"] = Field(default_factory=list)
     domains_coordinated: list[str] = Field(default_factory=list)
     qa_history: list[QaTurn] = Field(default_factory=list)

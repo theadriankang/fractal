@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_user, require_contributor
 from ..db import get_db
 from ..governance import audit
-from ..insights.analysis import AnalysisError, detect_issues, parse_csv
+from ..insights.analysis import AnalysisError, build_chart_spec, detect_issues, parse_csv
 from ..insights.narrative import synthesize
 from ..insights.report import render_html
 from ..llm import claude
@@ -97,6 +97,7 @@ async def generate_report(
         raise HTTPException(400, str(e)) from e
 
     issues = detect_issues(parsed)
+    chart_spec = build_chart_spec(parsed)
     report_title = title.strip() or f"Analysis of {file.filename or 'uploaded data'}"
     domain_list = [d.strip() for d in domains.split(",") if d.strip()]
 
@@ -131,6 +132,7 @@ async def generate_report(
             "categories": parsed.categories, "periods": parsed.periods,
         },
         narrative=narrative or "",
+        chart_spec=chart_spec,
         expertise_used=expertise_used,
         domains_coordinated=domains_coordinated,
         qa_history=[],

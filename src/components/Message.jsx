@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import ChartBlock from './ChartBlock'
 import {
   Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, BookOpenCheck, FileText, Globe, X,
 } from 'lucide-react'
@@ -60,6 +61,29 @@ function ExpertiseUsed({ refs }) {
   )
 }
 
+/**
+ * A fenced ```chart block (JSON spec — see ChartBlock.jsx) renders as an actual chart
+ * instead of a code block. The model is told this convention in the system prompt
+ * (backend/app/prompts.py). While streaming, the JSON may still be incomplete — that
+ * parse failure is expected and just falls back to rendering nothing until it completes,
+ * rather than flashing broken JSON at the person.
+ */
+const markdownComponents = {
+  code(props) {
+    const { children, className, node, ...rest } = props
+    const match = /language-(\w+)/.exec(className || '')
+    if (match?.[1] === 'chart') {
+      const raw = String(children).replace(/\n$/, '')
+      try {
+        return <ChartBlock spec={JSON.parse(raw)} />
+      } catch {
+        return null
+      }
+    }
+    return <code {...rest} className={className}>{children}</code>
+  },
+}
+
 function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
   const r = msg.responses[idx]
   const { regenerate, rateResponse, user, expertise } = useStore()
@@ -81,7 +105,7 @@ function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
       <ModelBadge response={r} />
       <div className="prose prose-sm mt-2 max-w-none dark:prose-invert prose-p:leading-relaxed prose-li:my-0.5 sm:prose-base sm:text-[15px]">
         {r.content ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{r.content}</ReactMarkdown>
         ) : r.error ? null : (
           <div className="flex gap-1 py-2">
             {[0, 1, 2].map((i) => <span key={i} className="h-2 w-2 animate-pulse rounded-full bg-gray-400" style={{ animationDelay: `${i * 150}ms` }} />)}

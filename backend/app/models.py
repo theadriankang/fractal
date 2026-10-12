@@ -136,6 +136,7 @@ class DataReport(Base):
     top_issues: Mapped[list] = mapped_column(JSON, default=list)
     raw_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     narrative: Mapped[str] = mapped_column(Text, default="")
+    chart_spec: Mapped[dict] = mapped_column(JSON, default=dict)
     expertise_used: Mapped[list] = mapped_column(JSON, default=list)
     domains_coordinated: Mapped[list] = mapped_column(JSON, default=list)
     qa_history: Mapped[list] = mapped_column(JSON, default=list)

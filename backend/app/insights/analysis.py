@@ -164,3 +164,32 @@ def detect_issues(data: ParsedData, top_n: int = 5) -> list[Issue]:
 
     candidates.sort(key=lambda i: max(abs(i.z_score or 0), abs((i.pct_change or 0) / 50)), reverse=True)
     return candidates[:top_n]
+
+
+def build_chart_spec(data: ParsedData, max_series: int = 8) -> dict:
+    """A ready-to-render line-chart spec (see src/components/ChartBlock.jsx) of every
+    category's values across periods — so a Data Insights report shows an actual trend
+    chart, not just a table of flagged anomalies. Capped to the `max_series` largest-range
+    categories (the ones most likely to matter) so a dataset with many categories doesn't
+    render an unreadable chart."""
+    by_period: dict[str, dict[str, float]] = {}
+    ranges: dict[str, float] = {}
+    by_category: dict[str, list[float]] = {}
+    for r in data.rows:
+        by_period.setdefault(r["period"], {})[r["category"]] = r["value"]
+        by_category.setdefault(r["category"], []).append(r["value"])
+    for cat, values in by_category.items():
+        ranges[cat] = (max(values) - min(values)) if len(values) > 1 else 0.0
+
+    categories = sorted(data.categories, key=lambda c: ranges.get(c, 0.0), reverse=True)[:max_series]
+    chart_rows = [
+        {"period": period, **{cat: by_period.get(period, {}).get(cat) for cat in categories}}
+        for period in data.periods
+    ]
+    return {
+        "type": "line",
+        "title": f"{data.value_col} by {data.category_col}, over {data.period_col}",
+        "data": chart_rows,
+        "xKey": "period",
+        "series": categories,
+    }

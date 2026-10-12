@@ -14,6 +14,7 @@ create table if not exists public.data_reports (
   top_issues           jsonb not null default '[]'::jsonb,
   raw_metrics          jsonb not null default '{}'::jsonb,
   narrative            text not null default '',
+  chart_spec           jsonb not null default '{}'::jsonb,
   expertise_used       jsonb not null default '[]'::jsonb,
   domains_coordinated  jsonb not null default '[]'::jsonb,
   qa_history           jsonb not null default '[]'::jsonb,
