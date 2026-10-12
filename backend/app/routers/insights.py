@@ -119,7 +119,7 @@ async def generate_report(
 
     expertise_used = [{"id": e.id, "name": e.name, "domain": e.domain, "version": e.version} for e in matched_rows]
     domains_coordinated = sorted({e.domain for e in matched_rows})
-    html = render_html(report_title, parsed, issues, narrative=narrative, expertise_used=expertise_used)
+    html = render_html(report_title, parsed, issues)
 
     row = DataReport(
         title=report_title,

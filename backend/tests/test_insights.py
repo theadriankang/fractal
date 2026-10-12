@@ -332,7 +332,7 @@ def test_generate_report_includes_narrative_when_claude_configured_and_expertise
     assert "Level 12 is unusual." in report["narrative"]
     assert any(e["name"] == "Chiller Staging" for e in report["expertiseUsed"])
     assert "Energy Optimisation" in report["domainsCoordinated"]
-    assert "Expert analysis" in report["html"]
+    assert "Top issues flagged" in report["html"]  # narrative now renders client-side via ReactMarkdown, not baked into html
 
 
 def test_generate_report_has_empty_narrative_when_claude_not_configured(api_db):
@@ -463,3 +463,117 @@ def test_capture_insight_blocked_for_reviewer_role(api_db):
         headers=_auth(),
     )
     assert r.status_code == 403
+
+# --- adaptive shape detection: "wide" and "snapshot" -------------------------
+# Real-world uploads don't all arrive as a tidy category+period+value log. These cover the
+# two other shapes _parse_rows now detects automatically (see insights/analysis.py).
+
+_WIDE_CSV = """buildingname,address,2018energyuseintensity,2019energyusintensity
+Tower A,1 Raffles Pl,120,135
+Tower B,2 Marina Blvd,98,101
+Tower C,3 Shenton Way,250,410
+"""
+
+_SNAPSHOT_CSV = """buildingname,address,greenmark,energyuseintensity
+Tower A,1 Raffles Pl,Gold,120
+Tower B,2 Marina Blvd,Gold Plus,101
+Tower C,3 Shenton Way,Certified,410
+Tower D,4 Battery Rd,Platinum,115
+Tower E,5 Collyer Quay,Gold,108
+"""
+
+# Regression test modeling the actual Keppel/BCA building-energy-performance dataset shape
+# that originally produced nonsense "N/A spiked in N/A" output: one row per building, no
+# period column, two year-coded numeric columns (so "wide"), several sparse/blank fields,
+# and "N/A"-style missing-value markers.
+_KEPPEL_LIKE_CSV = """buildingname,address,buildingtype,grossfloorarea,greenmarkrating,2018energyuseintensity,2019energyusintensity,voluntarydisclosure
+Tower A,1 Raffles Pl,Office,50000,Gold,120,135,Y
+Tower B,,Office,48000,Gold Plus,98,101,N/A
+Tower C,3 Shenton Way,Retail,,Certified,250,410,Y
+Tower D,4 Battery Rd,Office,52000,N/A,110,n/a,N/A
+"""
+
+
+def test_parse_csv_detects_wide_shape_and_melts_year_columns():
+    parsed = parse_csv(_WIDE_CSV)
+    assert parsed.shape == "wide"
+    assert parsed.category_col == "buildingname"
+    assert parsed.period_col == "year"
+    # 3 buildings x 2 years = 6 melted rows.
+    assert len(parsed.rows) == 6
+    assert parsed.periods == ["2018", "2019"]
+    assert "Tower A" in parsed.categories
+
+
+def test_detect_issues_on_wide_shape_flags_the_real_jump():
+    parsed = parse_csv(_WIDE_CSV)
+    issues = detect_issues(parsed, top_n=5)
+    assert issues
+    # Tower C jumps from 250 -> 410 (+64%), the clear outlier vs. Tower A/B's modest moves.
+    assert issues[0].category == "Tower C"
+
+
+def test_build_chart_spec_on_wide_shape_is_still_a_line_chart():
+    parsed = parse_csv(_WIDE_CSV)
+    spec = build_chart_spec(parsed)
+    assert spec["type"] == "line"
+    assert spec["xKey"] == "period"
+
+
+def test_parse_csv_detects_snapshot_shape_when_no_period_or_melt_group():
+    parsed = parse_csv(_SNAPSHOT_CSV)
+    assert parsed.shape == "snapshot"
+    assert parsed.category_col == "buildingname"
+    assert parsed.value_col == "energyuseintensity"
+    assert len(parsed.rows) == 5
+
+
+def test_detect_issues_on_snapshot_shape_flags_population_outliers_not_nonsense():
+    parsed = parse_csv(_SNAPSHOT_CSV)
+    issues = detect_issues(parsed, top_n=5)
+    assert issues
+    # Tower C (410) is a clear outlier against the other buildings clustered ~100-120.
+    assert issues[0].category == "Tower C"
+    assert issues[0].z_score is not None
+    for issue in issues:
+        assert issue.category != "(unlabelled)"
+        assert "N/A" not in issue.title
+
+
+def test_build_chart_spec_on_snapshot_shape_is_a_bar_chart_not_a_meaningless_line():
+    parsed = parse_csv(_SNAPSHOT_CSV)
+    spec = build_chart_spec(parsed)
+    assert spec["type"] == "bar"
+    assert spec["xKey"] == "category"
+
+
+def test_missing_value_markers_normalise_to_unlabelled_not_literal_na():
+    # A category cell of "N/A" must never produce a literal "N/A spiked in N/A" issue title.
+    csv_text = "name,period,value\nA,2026-01,100\nN/A,2026-01,500\n,2026-02,50\n"
+    parsed = parse_csv(csv_text)
+    assert "(unlabelled)" in parsed.categories
+    assert "N/A" not in parsed.categories
+
+
+def test_keppel_like_wide_dataset_no_longer_produces_na_spiked_in_na():
+    """Regression test for the real-world failure: a one-row-per-building export with two
+    year-coded numeric columns, sparse optional fields, and 'N/A' missing-value markers used
+    to be forced into a bogus 'category+first-remaining-column-as-period' guess, producing
+    nonsense like 'N/A spiked in N/A'. It should now be detected as 'wide' and melt cleanly."""
+    parsed = parse_csv(_KEPPEL_LIKE_CSV)
+    assert parsed.shape == "wide"
+    assert parsed.category_col == "buildingname"
+    assert parsed.period_col == "year"
+    assert set(parsed.periods) == {"2018", "2019"}
+    assert "Tower A" in parsed.categories
+    # Building B has a blank address but that's not the category column, so it still shows
+    # up as itself, not folded into "(unlabelled)".
+    assert "Tower B" in parsed.categories
+
+    issues = detect_issues(parsed, top_n=5)
+    for issue in issues:
+        assert "N/A" not in issue.title
+        assert issue.category != "(unlabelled)" or issue.period != "(unlabelled)"
+
+    html = render_html("Keppel-like report", parsed, issues)
+    assert "N/A spiked in N/A" not in html

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { AlertTriangle, BarChart3, BookmarkPlus, ChevronDown, Loader2, Send, Upload } from 'lucide-react'
 import { useStore } from '../store'
 import { insightsApi } from '../lib/api'
@@ -106,10 +108,10 @@ export default function Insights() {
             <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
               <h2 className="mb-2 text-sm font-semibold">Generate a report</h2>
               <p className="mb-3 text-xs text-gray-500">
-                Upload any CSV or Excel (.xlsx) file with a category, period and numeric value
-                column. Works for any domain — usage data, costs, tickets, occupancy — the
-                agent guesses the columns and grounds its analysis in whichever Expertise
-                actually matches.
+                Upload any CSV or Excel (.xlsx) file — usage logs, cost trackers, ticket
+                exports, building listings, anything tabular. The agent adapts to whatever
+                shape the data is in (a time series, one column per year, or a one-off
+                snapshot) and grounds its analysis in whichever Expertise actually matches.
               </p>
               <input
                 className="mb-2 w-full rounded-lg border border-gray-200 bg-transparent px-2.5 py-1.5 text-sm outline-none focus:border-accent-500 dark:border-gray-700"
@@ -183,14 +185,25 @@ export default function Insights() {
                   dangerouslySetInnerHTML={{ __html: active.html }}
                 />
                 {active.narrative && (
-                  <CaptureInline
-                    reportId={active.id}
-                    initialText={active.narrative.slice(0, 400)}
-                    domainHint={active.domainsCoordinated?.[0] || active.domains?.[0]}
-                    approved={approved}
-                    onSaved={refreshActive}
-                    label="Save this analysis as Expertise"
-                  />
+                  <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                    <h3 className="mb-1 text-sm font-semibold">Expert analysis</h3>
+                    <p className="mb-3 text-xs text-gray-500">
+                      {active.expertiseUsed?.length > 0
+                        ? `Grounded in approved Expertise: ${active.expertiseUsed.map((e) => e.name).join(', ')}`
+                        : 'No approved Expertise matched — general guidance only.'}
+                    </p>
+                    <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:mb-1.5 prose-headings:mt-4 prose-p:my-1.5 prose-li:my-0.5 sm:prose-base sm:text-[15px]">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{active.narrative}</ReactMarkdown>
+                    </div>
+                    <CaptureInline
+                      reportId={active.id}
+                      initialText={active.narrative.slice(0, 400)}
+                      domainHint={active.domainsCoordinated?.[0] || active.domains?.[0]}
+                      approved={approved}
+                      onSaved={refreshActive}
+                      label="Save this analysis as Expertise"
+                    />
+                  </div>
                 )}
 
                 <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
