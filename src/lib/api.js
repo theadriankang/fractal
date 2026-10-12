@@ -387,5 +387,9 @@ export function insightsApi(user) {
     listReports: () => request(user, 'GET', '/insights/reports'),
     getReport: (id) => request(user, 'GET', `/insights/reports/${enc(id)}`),
     askReport: (id, question) => request(user, 'POST', `/insights/reports/${enc(id)}/ask`, { question }),
+    /** Captures a finding (report-level or a specific qaIndex) into governed Expertise —
+     * either a revision Proposal (pass expertiseId) or a new draft (omit it). Goes through
+     * the normal Review Queue; never writes live Expertise directly. */
+    captureInsight: (reportId, body) => request(user, 'POST', `/insights/reports/${enc(reportId)}/capture`, body),
   }
 }

@@ -118,7 +118,15 @@ class Expertise(Base):
 
 class DataReport(Base):
     """A generated Data Insights report: automated analysis + top-issue flags on any
-    uploaded tabular data, kept historically so trends build up over time."""
+    uploaded tabular data, kept historically so trends build up over time.
+
+    `narrative` is the Expertise-grounded synthesis (analysis, blind spots, prioritised
+    issues, potential resolutions) written as if the relevant domain expert were explaining
+    the data — not just the raw statistical top_issues table. `expertise_used` /
+    `domains_coordinated` record which approved Expertise grounded that synthesis.
+    `qa_history` persists every follow-up question asked about this report (and its
+    grounded answer) so past exchanges stay available for future reference, the same way
+    the report itself does."""
     __tablename__ = "data_reports"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid_str)
     title: Mapped[str] = mapped_column(Text, default="")
@@ -127,6 +135,10 @@ class DataReport(Base):
     html: Mapped[str] = mapped_column(Text, default="")
     top_issues: Mapped[list] = mapped_column(JSON, default=list)
     raw_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    narrative: Mapped[str] = mapped_column(Text, default="")
+    expertise_used: Mapped[list] = mapped_column(JSON, default=list)
+    domains_coordinated: Mapped[list] = mapped_column(JSON, default=list)
+    qa_history: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

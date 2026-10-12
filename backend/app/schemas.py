@@ -418,6 +418,13 @@ class ChatStreamRequest(BaseModel):
 # Data Insights — generic (domain-agnostic) data-analysis reports
 # ===========================================================================
 
+class ExpertiseCitation(CamelModel):
+    id: str
+    name: str
+    domain: str
+    version: str
+
+
 class IssueOut(CamelModel):
     category: str
     period: str
@@ -440,6 +447,14 @@ class DataReportSummary(CamelModel):
     created_by: str | None = None
 
 
+class QaTurn(CamelModel):
+    question: str
+    answer: str
+    expertise_used: list["ExpertiseCitation"] = Field(default_factory=list)
+    domains_coordinated: list[str] = Field(default_factory=list)
+    asked_at: datetime
+
+
 class DataReportOut(CamelModel):
     id: str
     title: str
@@ -448,6 +463,10 @@ class DataReportOut(CamelModel):
     html: str
     top_issues: list[IssueOut] = Field(default_factory=list)
     raw_metrics: dict = Field(default_factory=dict)
+    narrative: str = ""
+    expertise_used: list["ExpertiseCitation"] = Field(default_factory=list)
+    domains_coordinated: list[str] = Field(default_factory=list)
+    qa_history: list[QaTurn] = Field(default_factory=list)
     created_at: datetime
     created_by: str | None = None
 
@@ -456,14 +475,27 @@ class InsightsAskRequest(BaseModel):
     question: str
 
 
-class ExpertiseCitation(CamelModel):
-    id: str
-    name: str
-    domain: str
-    version: str
-
-
 class InsightsAskResponse(CamelModel):
     answer: str
     expertiseUsed: list[ExpertiseCitation] = Field(default_factory=list)
     domainsCoordinated: list[str] = Field(default_factory=list)
+
+
+class InsightsCaptureRequest(CamelModel):
+    """Turns a report-level finding or a Q&A exchange into governed Expertise content —
+    reuses the same propose -> review -> approve loop as every other capture path, never
+    writing live Expertise directly."""
+    text: str  # the knowledge line to capture, as reviewed/edited by the contributor
+    domain: str
+    topic: str = ""
+    decision_step: Optional[dict] = None  # DecisionStep-shaped: {text, condition, action, reasoning, escalateIf}
+    expertise_id: Optional[str] = None  # propose a revision to this existing Expertise; omit to draft a new one
+    reason: str = ""
+    qa_index: Optional[int] = None  # which qa_history entry this came from, if any (for sources)
+
+
+class InsightsCaptureResponse(CamelModel):
+    kind: Literal["proposal", "draft"]
+    id: str
+    expertise_id: Optional[str] = None
+    status: str
