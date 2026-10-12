@@ -115,7 +115,7 @@ export async function extractKnowhow(body, { timeoutMs = 20000 } = {}) {
 }
 
 // Chat attachments. Limits match backend/app/files.py.
-export const FILE_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg'
+export const FILE_ACCEPT = '.pdf,.docx,.xlsx,.txt,.md,.csv,.png,.jpg,.jpeg'
 export const MAX_FILES = 5
 export const MAX_FILE_BYTES = 10 * 1024 * 1024
 

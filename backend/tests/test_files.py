@@ -48,6 +48,19 @@ def docx_with(paragraph: str) -> bytes:
     return buf.getvalue()
 
 
+def xlsx_with(rows: list[list]) -> bytes:
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Readings"
+    for row in rows:
+        ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 @pytest.fixture(autouse=True)
 def tmp_uploads(tmp_path, monkeypatch):
     monkeypatch.setattr(files, "UPLOAD_DIR", tmp_path)
@@ -69,6 +82,16 @@ def test_docx_upload_includes_paragraphs_and_tables():
     meta = upload("handover.docx", docx_with("Level 23 warm since 2pm")).json()
     text = files.text_attachments([meta["id"]])
     assert "Level 23 warm since 2pm" in text and "Chiller 2 | Tripped" in text
+
+
+def test_xlsx_upload_extracts_sheet_name_and_rows():
+    data = xlsx_with([["level", "month", "usage_kwh"], ["Level 12", "2026-07", 2400]])
+    meta = upload("usage.xlsx", data).json()
+    assert meta["kind"] == "xlsx" and meta["chars"] > 0
+    text = files.text_attachments([meta["id"]])
+    assert "Sheet: Readings" in text
+    assert "level, month, usage_kwh" in text
+    assert "Level 12, 2026-07, 2400" in text
 
 
 @pytest.mark.parametrize(

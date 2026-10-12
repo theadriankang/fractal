@@ -25,6 +25,7 @@ OTHER_TEXT_LIMIT = 20_000  # characters of any file sent to non-Claude models
 TYPES = {
     ".pdf": ("pdf", "application/pdf"),
     ".docx": ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    ".xlsx": ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     ".txt": ("text", "text/plain"),
     ".md": ("text", "text/markdown"),
     ".csv": ("text", "text/csv"),
@@ -55,6 +56,22 @@ def _extract(kind: str, data: bytes) -> tuple[str, int | None]:
         for table in doc.tables:
             lines += [" | ".join(cell.text for cell in row.cells) for row in table.rows]
         return "\n".join(lines).strip(), None
+    if kind == "xlsx":
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        try:
+            parts: list[str] = []
+            for ws in wb.worksheets:
+                rows = list(ws.iter_rows(values_only=True))
+                if not rows:
+                    continue
+                parts.append(f"## Sheet: {ws.title}")
+                for row in rows:
+                    parts.append(", ".join("" if c is None else str(c) for c in row))
+        finally:
+            wb.close()
+        return "\n".join(parts).strip(), None
     if kind == "text":
         return data.decode("utf-8-sig", errors="replace").strip(), None
     return "", None
@@ -64,7 +81,7 @@ def save_upload(filename: str, data: bytes) -> dict:
     name = Path(filename).name[:200] or "file"
     ext = Path(name).suffix.lower()
     if ext not in TYPES:
-        raise UploadError(f"{name}: unsupported file type. Use PDF, DOCX, TXT, MD, CSV, PNG or JPG.")
+        raise UploadError(f"{name}: unsupported file type. Use PDF, DOCX, XLSX, TXT, MD, CSV, PNG or JPG.")
     if not data:
         raise UploadError(f"{name} is empty.")
     if len(data) > MAX_BYTES:
