@@ -13,6 +13,8 @@ import io
 import statistics
 from dataclasses import dataclass, field
 
+from openpyxl import load_workbook
+
 # Column-name hints used to guess which column is the time axis vs. the metric. Order matters —
 # first match wins.
 _PERIOD_HINTS = ("period", "month", "date", "week", "day", "time")
@@ -81,12 +83,15 @@ def _pick_columns(headers: list[str], sample_rows: list[dict]) -> tuple[str, str
     return category_col, period_col, value_col
 
 
-def parse_csv(raw_text: str) -> ParsedData:
-    reader = csv.DictReader(io.StringIO(raw_text))
-    headers = reader.fieldnames or []
+def _parse_rows(headers: list[str], all_rows: list[dict]) -> ParsedData:
+    """Shared tabular-data pipeline, format-independent: both parse_csv (list[dict] from
+    csv.DictReader) and parse_xlsx (list[dict] built from an openpyxl sheet) funnel through
+    here once they've reduced their own format to the same {header: cell-value} row shape.
+    Keeping this in one place means column-guessing, coercion and validation behave
+    identically regardless of which file format the data came from."""
     if len(headers) < 2:
         raise AnalysisError("This file doesn't look like tabular data (need at least 2 columns).")
-    all_rows = [r for r in reader if any((v or "").strip() for v in r.values())]
+    all_rows = [r for r in all_rows if any(str(v or "").strip() for v in r.values())]
     if not all_rows:
         raise AnalysisError("No data rows found in this file.")
 
@@ -98,8 +103,8 @@ def parse_csv(raw_text: str) -> ParsedData:
         if value is None:
             continue
         rows.append({
-            "category": (r.get(category_col) or "").strip() or "(unlabelled)",
-            "period": (r.get(period_col) or "").strip() or "(unknown)",
+            "category": str(r.get(category_col) or "").strip() or "(unlabelled)",
+            "period": str(r.get(period_col) or "").strip() or "(unknown)",
             "value": value,
         })
     if not rows:
@@ -108,6 +113,47 @@ def parse_csv(raw_text: str) -> ParsedData:
     categories = sorted({r["category"] for r in rows})
     periods = sorted({r["period"] for r in rows})
     return ParsedData(category_col, period_col, value_col, rows, categories, periods)
+
+
+def parse_csv(raw_text: str) -> ParsedData:
+    reader = csv.DictReader(io.StringIO(raw_text))
+    headers = reader.fieldnames or []
+    return _parse_rows(headers, list(reader))
+
+
+def parse_xlsx(raw_bytes: bytes) -> ParsedData:
+    """Same pipeline as parse_csv, for an uploaded .xlsx file. Reads the first (or only)
+    worksheet, treats its first row as headers, and converts every other row into the same
+    {header: cell-value} shape _parse_rows expects -- so column-guessing and anomaly
+    detection work identically regardless of upload format."""
+    try:
+        wb = load_workbook(io.BytesIO(raw_bytes), read_only=True, data_only=True)
+    except Exception as e:
+        raise AnalysisError(f"Couldn't read this as an Excel file: {e}") from e
+
+    try:
+        ws = wb.active
+        if ws is None:
+            raise AnalysisError("This workbook has no worksheets.")
+        rows_iter = ws.iter_rows(values_only=True)
+        try:
+            header_row = next(rows_iter)
+        except StopIteration:
+            raise AnalysisError("This workbook's first sheet is empty.")
+
+        headers = [str(h).strip() if h is not None else "" for h in header_row]
+        headers = [h for h in headers if h]  # drop trailing blank header cells
+        if len(headers) < 2:
+            raise AnalysisError("This file doesn't look like tabular data (need at least 2 columns).")
+
+        all_rows = []
+        for row in rows_iter:
+            cells = dict(zip(headers, row))
+            all_rows.append({k: ("" if v is None else v) for k, v in cells.items()})
+    finally:
+        wb.close()
+
+    return _parse_rows(headers, all_rows)
 
 
 @dataclass

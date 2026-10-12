@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
-from app.insights.analysis import AnalysisError, build_chart_spec, detect_issues, parse_csv
+from app.insights.analysis import AnalysisError, build_chart_spec, detect_issues, parse_csv, parse_xlsx
 from app.insights.report import render_html
 from app.main import app
 
@@ -170,6 +170,76 @@ def test_generate_report_round_trips_and_lists_historically(api_db):
     got = client.get(f"/api/insights/reports/{report['id']}", headers=_auth())
     assert got.status_code == 200
     assert got.json()["html"] == report["html"]
+
+
+def _make_xlsx_bytes(rows):
+    """Builds a minimal .xlsx file in memory from a list of row-tuples (first row = headers),
+    for tests -- so .xlsx support is exercised against a real openpyxl-written file, not a
+    hand-crafted mock of one."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    for row in rows:
+        ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_parse_xlsx_matches_parse_csv_on_equivalent_data():
+    xlsx_bytes = _make_xlsx_bytes([
+        ("level", "month", "usage_kwh"),
+        ("Level 10", "2026-05", 1000),
+        ("Level 10", "2026-06", 1050),
+        ("Level 12", "2026-05", 900),
+        ("Level 12", "2026-07", 2400),
+    ])
+    parsed = parse_xlsx(xlsx_bytes)
+    assert parsed.category_col == "level"
+    assert parsed.period_col == "month"
+    assert parsed.value_col == "usage_kwh"
+    assert set(parsed.categories) == {"Level 10", "Level 12"}
+    assert len(parsed.rows) == 4
+    assert any(r["category"] == "Level 12" and r["period"] == "2026-07" and r["value"] == 2400.0 for r in parsed.rows)
+
+
+def test_parse_xlsx_rejects_empty_workbook():
+    xlsx_bytes = _make_xlsx_bytes([])
+    with pytest.raises(AnalysisError):
+        parse_xlsx(xlsx_bytes)
+
+
+def test_parse_xlsx_rejects_single_column():
+    xlsx_bytes = _make_xlsx_bytes([("only_header",), ("value1",), ("value2",)])
+    with pytest.raises(AnalysisError):
+        parse_xlsx(xlsx_bytes)
+
+
+def test_generate_report_accepts_xlsx_upload(api_db):
+    client = TestClient(app)
+    xlsx_bytes = _make_xlsx_bytes([
+        ("level", "month", "usage_kwh"),
+        ("Level 10", "2026-05", 1000),
+        ("Level 10", "2026-06", 1050),
+        ("Level 10", "2026-07", 1080),
+        ("Level 10", "2026-08", 1100),
+        ("Level 12", "2026-05", 900),
+        ("Level 12", "2026-06", 950),
+        ("Level 12", "2026-07", 2400),
+        ("Level 12", "2026-08", 2600),
+    ])
+    files = {"file": ("usage.xlsx", io.BytesIO(xlsx_bytes), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    r = client.post(
+        "/api/insights/reports/generate",
+        files=files, data={"title": "Excel Upload Test"},
+        headers=_auth(),
+    )
+    assert r.status_code == 200, r.text
+    report = r.json()
+    assert report["title"] == "Excel Upload Test"
+    assert len(report["topIssues"]) > 0
+    assert report["topIssues"][0]["category"] == "Level 12"
+    assert report["chartSpec"]["type"] == "line"
 
 
 def test_generate_report_rejects_bad_file(api_db):

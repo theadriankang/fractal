@@ -106,9 +106,10 @@ export default function Insights() {
             <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
               <h2 className="mb-2 text-sm font-semibold">Generate a report</h2>
               <p className="mb-3 text-xs text-gray-500">
-                Upload any CSV with a category, period and numeric value column. Works for any
-                domain — usage data, costs, tickets, occupancy — the agent guesses the columns
-                and grounds its analysis in whichever Expertise actually matches.
+                Upload any CSV or Excel (.xlsx) file with a category, period and numeric value
+                column. Works for any domain — usage data, costs, tickets, occupancy — the
+                agent guesses the columns and grounds its analysis in whichever Expertise
+                actually matches.
               </p>
               <input
                 className="mb-2 w-full rounded-lg border border-gray-200 bg-transparent px-2.5 py-1.5 text-sm outline-none focus:border-accent-500 dark:border-gray-700"
@@ -128,7 +129,7 @@ export default function Insights() {
                   </button>
                 ))}
               </div>
-              <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+              <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
               <button
                 className="btn-accent w-full justify-center"
                 disabled={uploading}

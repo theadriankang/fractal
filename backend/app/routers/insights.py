@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_user, require_contributor
 from ..db import get_db
 from ..governance import audit
-from ..insights.analysis import AnalysisError, build_chart_spec, detect_issues, parse_csv
+from ..insights.analysis import AnalysisError, build_chart_spec, detect_issues, parse_csv, parse_xlsx
 from ..insights.narrative import synthesize
 from ..insights.report import render_html
 from ..llm import claude
@@ -79,20 +79,28 @@ async def generate_report(
     db: Session = Depends(get_db),
     user: Profile = Depends(get_current_user),
 ):
-    """Parses the uploaded CSV, runs generic anomaly detection, grounds an expert-style
-    briefing in whichever approved Expertise matches (any domain — this isn't energy-
-    specific), renders the HTML report, and stores it. Column guessing lives in
-    app.insights.analysis._pick_columns, so this works on any tabular data."""
+    """Parses the uploaded file (.csv or .xlsx), runs generic anomaly detection, grounds an
+    expert-style briefing in whichever approved Expertise matches (any domain — this isn't
+    energy-specific), renders the HTML report, and stores it. Column guessing lives in
+    app.insights.analysis._pick_columns, so this works on any tabular data regardless of
+    which of the two formats it arrived in."""
     data = await file.read()
     if len(data) > MAX_BYTES:
         raise HTTPException(413, "File is larger than 5 MB.")
-    try:
-        text = data.decode("utf-8-sig", errors="replace")
-    except Exception as e:
-        raise HTTPException(400, f"Could not read file as text: {e}") from e
 
+    filename = (file.filename or "").lower()
     try:
-        parsed = parse_csv(text)
+        if filename.endswith(".xlsx"):
+            parsed = parse_xlsx(data)
+        else:
+            # Anything else (.csv, or no/unknown extension) is treated as CSV text -- this
+            # matches the pre-.xlsx-support behaviour exactly, so plain CSV uploads with an
+            # unusual or missing extension still work.
+            try:
+                text = data.decode("utf-8-sig", errors="replace")
+            except Exception as e:
+                raise HTTPException(400, f"Could not read file as text: {e}") from e
+            parsed = parse_csv(text)
     except AnalysisError as e:
         raise HTTPException(400, str(e)) from e
 
