@@ -11,6 +11,7 @@ import ReviewQueue from './pages/ReviewQueue'
 import AuditLog from './pages/AuditLog'
 import MeetingRecorder from './pages/MeetingRecorder'
 import WritingAssistant from './pages/WritingAssistant'
+import Insights from './pages/Insights'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import AccessGate from './components/AccessGate'
@@ -61,6 +62,7 @@ function Shell() {
           </Route>
           <Route path="/meetings" element={<MeetingRecorder />} />
           <Route path="/writing" element={<WritingAssistant />} />
+          <Route path="/insights" element={<Insights />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

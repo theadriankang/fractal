@@ -412,3 +412,58 @@ class ChatStreamRequest(BaseModel):
     messages: list[ChatTurn] = Field(min_length=1, max_length=40)
     expertise: list[ExpertiseIn] = Field(default=[], max_length=10)
     routing: RoutingIn | None = None
+
+
+# ===========================================================================
+# Data Insights — generic (domain-agnostic) data-analysis reports
+# ===========================================================================
+
+class IssueOut(CamelModel):
+    category: str
+    period: str
+    value: float
+    prevValue: float | None = None
+    pctChange: float | None = None
+    zScore: float | None = None
+    severity: str
+    title: str
+    detail: str
+
+
+class DataReportSummary(CamelModel):
+    id: str
+    title: str
+    source_filename: str
+    domains: list[str] = Field(default_factory=list)
+    top_issue_count: int
+    created_at: datetime
+    created_by: str | None = None
+
+
+class DataReportOut(CamelModel):
+    id: str
+    title: str
+    source_filename: str
+    domains: list[str] = Field(default_factory=list)
+    html: str
+    top_issues: list[IssueOut] = Field(default_factory=list)
+    raw_metrics: dict = Field(default_factory=dict)
+    created_at: datetime
+    created_by: str | None = None
+
+
+class InsightsAskRequest(BaseModel):
+    question: str
+
+
+class ExpertiseCitation(CamelModel):
+    id: str
+    name: str
+    domain: str
+    version: str
+
+
+class InsightsAskResponse(CamelModel):
+    answer: str
+    expertiseUsed: list[ExpertiseCitation] = Field(default_factory=list)
+    domainsCoordinated: list[str] = Field(default_factory=list)

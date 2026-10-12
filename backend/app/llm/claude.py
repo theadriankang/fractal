@@ -49,3 +49,15 @@ async def stream_reply(model_key: str, system: str, messages: list[dict], *, max
         return
     # final.model differs from the requested model when a server-side fallback answered.
     yield "done", {"stopReason": final.stop_reason, "model": final.model}
+
+
+async def answer_once(system: str, user_text: str, *, max_tokens: int = 1500) -> str:
+    """One-shot (non-streaming) Claude answer — for server-side flows that need a single
+    grounded text response rather than a chat stream (e.g. the Data Insights Q&A)."""
+    msg = await client.messages.create(
+        model=MODELS["claude-sonnet"]["model"],
+        max_tokens=max_tokens,
+        system=system,
+        messages=[{"role": "user", "content": user_text}],
+    )
+    return "".join(b.text for b in msg.content if b.type == "text").strip()

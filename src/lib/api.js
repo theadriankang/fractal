@@ -344,3 +344,48 @@ export function apiFor(user) {
     },
   }
 }
+
+// ---------------------------------------------------------------------------
+// Data Insights — generic (domain-agnostic) data-analysis reports.
+// Upload any tabular data, get an automated report + proactively-flagged top
+// issues (stored historically), then ask follow-up questions grounded in
+// whichever domains' Expertise actually match — cross-domain coordination.
+// ---------------------------------------------------------------------------
+
+function _authHeaders(user) {
+  return user?.accessToken
+    ? { Authorization: `Bearer ${user.accessToken}` }
+    : user?.email ? { 'X-User-Email': user.email } : {}
+}
+
+export function insightsApi(user) {
+  const headers = _authHeaders(user)
+
+  async function parseOrThrow(res) {
+    if (res.status === 204) return null
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new ApiError(typeof data?.detail === 'string' ? data.detail : `Backend error (${res.status}).`, data ? res.status : 0)
+    return data
+  }
+
+  return {
+    /** POST /api/insights/reports/generate — multipart upload; returns the full report. */
+    generateReport: async (file, { title = '', domains = [] } = {}) => {
+      const body = new FormData()
+      body.append('file', file)
+      if (title) body.append('title', title)
+      if (domains.length) body.append('domains', domains.join(','))
+      let res
+      try {
+        res = await apiFetch('/api/insights/reports/generate', { method: 'POST', headers, body })
+      } catch {
+        throw new ApiError('Backend offline.', 0)
+      }
+      return parseOrThrow(res)
+    },
+
+    listReports: () => request(user, 'GET', '/insights/reports'),
+    getReport: (id) => request(user, 'GET', `/insights/reports/${enc(id)}`),
+    askReport: (id, question) => request(user, 'POST', `/insights/reports/${enc(id)}/ask`, { question }),
+  }
+}

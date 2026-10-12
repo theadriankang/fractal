@@ -116,6 +116,21 @@ class Expertise(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class DataReport(Base):
+    """A generated Data Insights report: automated analysis + top-issue flags on any
+    uploaded tabular data, kept historically so trends build up over time."""
+    __tablename__ = "data_reports"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid_str)
+    title: Mapped[str] = mapped_column(Text, default="")
+    source_filename: Mapped[str] = mapped_column(Text, default="")
+    domains: Mapped[list] = mapped_column(JSON, default=list)
+    html: Mapped[str] = mapped_column(Text, default="")
+    top_issues: Mapped[list] = mapped_column(JSON, default=list)
+    raw_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class ExpertiseVersion(Base):
     __tablename__ = "expertise_versions"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid_str)

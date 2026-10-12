@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
 import {
   PanelLeftClose, SquarePen, Search, BookOpenCheck, MoreHorizontal, Pin, PinOff, Pencil, Trash2,
-  Settings, RotateCcw, Folder, ChevronDown, ChevronRight, Mic, Mail, Check, ChevronsUpDown, UserPlus, LogOut,
+  Settings, RotateCcw, Folder, ChevronDown, ChevronRight, Mic, Mail, BarChart3, Check, ChevronsUpDown, UserPlus, LogOut,
 } from 'lucide-react'
 import { useStore, reviewCount, chatOwner } from '../store'
 import { userById, roleSummary } from '../data/users'
@@ -148,6 +148,10 @@ export default function Sidebar() {
         <NavLink to="/writing" className={navCls}>
           <Mail size={17} />
           <span className="flex-1">Writing Assistant</span>
+        </NavLink>
+        <NavLink to="/insights" className={navCls}>
+          <BarChart3 size={17} />
+          <span className="flex-1">Data Insights</span>
         </NavLink>
       </div>
 
