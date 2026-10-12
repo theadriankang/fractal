@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ===========================================================================
@@ -90,6 +90,71 @@ class ChatOut(CamelModel):
     messages: list[MessageOut] = Field(default_factory=list)
 
 
+class DecisionStep(BaseModel):
+    """One structured reasoning step in an Expertise's decision logic.
+
+    `text` is the full original line (kept as the stable identity for dedup/diff/removal —
+    see governance.apply_changes — and as the grounding target for AI-captured items). The
+    other fields are an optional structured breakdown of that same line: what triggers it,
+    what was done, why, and when to escalate instead. All default to "" so existing plain
+    strings (pre-migration data, or a line nobody has broken down yet) coerce cleanly via
+    `coerce_decision_logic` below.
+    """
+
+    text: str = ""
+    condition: str = ""
+    action: str = ""
+    reasoning: str = ""
+    escalateIf: str = ""
+
+
+def coerce_decision_logic(v):
+    """Accepts the old shape (list[str]) and the new one (list[DecisionStep-like dict]) alike,
+    so existing rows / in-flight requests never fail validation during the migration window."""
+    if not isinstance(v, list):
+        return v
+    out = []
+    for item in v:
+        if isinstance(item, str):
+            out.append({"text": item})
+        else:
+            out.append(item)
+    return out
+
+
+def decision_step_text(x) -> str:
+    """Flatten one decisionLogic entry (plain string, DecisionStep, or raw dict from the DB's
+    JSON column) into a single readable line, for anywhere that needs plain text: embeddings,
+    the chat system prompt, and citation/reference text. Folds condition/action/reasoning/
+    escalateIf in when present so that detail isn't silently dropped from those surfaces."""
+    if isinstance(x, str):
+        return x
+    if isinstance(x, DecisionStep):
+        d = x.model_dump()
+    elif isinstance(x, dict):
+        d = x
+    else:
+        return str(x)
+    text = str(d.get("text") or "").strip()
+    bits = []
+    condition = str(d.get("condition") or "").strip()
+    action = str(d.get("action") or "").strip()
+    reasoning = str(d.get("reasoning") or "").strip()
+    escalate_if = str(d.get("escalateIf") or d.get("escalate_if") or "").strip()
+    if condition:
+        bits.append(f"if {condition}")
+    if action:
+        bits.append(f"then {action}")
+    if reasoning:
+        bits.append(f"because {reasoning}")
+    if escalate_if:
+        bits.append(f"escalate if {escalate_if}")
+    extra = "; ".join(bits)
+    if text and extra:
+        return f"{text} ({extra})"
+    return text or extra
+
+
 # --- Expertise --------------------------------------------------------------
 class ExpertiseCreate(CamelModel):
     id: Optional[str] = None
@@ -109,7 +174,7 @@ class ExpertiseCreate(CamelModel):
     summary: str = ""
     when_to_use: str = ""
     knowledge: list[str] = Field(default_factory=list)
-    decision_logic: list[str] = Field(default_factory=list)
+    decision_logic: list[DecisionStep] = Field(default_factory=list)
     guardrails: list[str] = Field(default_factory=list)
     escalation: list[str] = Field(default_factory=list)
     sources: list[dict] = Field(default_factory=list)
@@ -118,6 +183,11 @@ class ExpertiseCreate(CamelModel):
     capture: Optional[dict] = None
     author_id: Optional[str] = None
     versions: list[dict] = Field(default_factory=list)
+
+    @field_validator("decision_logic", mode="before")
+    @classmethod
+    def _coerce_decision_logic_create(cls, v):
+        return coerce_decision_logic(v)
 
 
 class ExpertisePatch(CamelModel):
@@ -137,12 +207,17 @@ class ExpertisePatch(CamelModel):
     summary: Optional[str] = None
     when_to_use: Optional[str] = None
     knowledge: Optional[list[str]] = None
-    decision_logic: Optional[list[str]] = None
+    decision_logic: Optional[list[DecisionStep]] = None
     guardrails: Optional[list[str]] = None
     escalation: Optional[list[str]] = None
     sources: Optional[list[dict]] = None
     feedback: Optional[list[dict]] = None
     origin: Optional[str] = None
+
+    @field_validator("decision_logic", mode="before")
+    @classmethod
+    def _coerce_decision_logic_patch(cls, v):
+        return coerce_decision_logic(v)
 
 
 class ExpertiseVersionOut(CamelModel):
@@ -183,7 +258,7 @@ class ExpertiseOut(CamelModel):
     summary: str
     when_to_use: str
     knowledge: list[str] = Field(default_factory=list)
-    decision_logic: list[str] = Field(default_factory=list)
+    decision_logic: list[DecisionStep] = Field(default_factory=list)
     guardrails: list[str] = Field(default_factory=list)
     escalation: list[str] = Field(default_factory=list)
     sources: list[dict] = Field(default_factory=list)
@@ -192,6 +267,11 @@ class ExpertiseOut(CamelModel):
     capture: Optional[dict] = None
     author_id: Optional[str] = None
     created_at: Optional[datetime] = None
+
+    @field_validator("decision_logic", mode="before")
+    @classmethod
+    def _coerce_decision_logic_out(cls, v):
+        return coerce_decision_logic(v)
     updated_at: Optional[datetime] = None
     versions: list[ExpertiseVersionOut] = Field(default_factory=list)
 
@@ -305,9 +385,14 @@ class ExpertiseIn(BaseModel):
     owner: str = ""
     whenToUse: str = ""
     knowledge: list[str] = []
-    decisionLogic: list[str] = []
+    decisionLogic: list[DecisionStep] = []
     guardrails: list[str] = []
     escalation: list[str] = []
+
+    @field_validator("decisionLogic", mode="before")
+    @classmethod
+    def _coerce_decision_logic_in(cls, v):
+        return coerce_decision_logic(v)
 
 
 # --- Smart Auto routing -------------------------------------------------------

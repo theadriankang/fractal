@@ -10,6 +10,7 @@
 import { getModel, getProvider } from '../data/models'
 import { DOMAINS } from '../data/expertise'
 import { TAXONOMY } from '../data/taxonomy'
+import { decisionStepText } from './decisionLogic'
 
 const tokenize = (s) => s.toLowerCase()
 
@@ -55,14 +56,14 @@ export function buildReply(prompt, modelId, expertise = []) {
 
   if (expertise.length) {
     const e = expertise[0]
-    const steps = e.decisionLogic.slice(0, 4).map((s, i) => `${i + 1}. ${s}`).join('\n')
+    const steps = e.decisionLogic.slice(0, 4).map((s, i) => `${i + 1}. ${decisionStepText(s)}`).join('\n')
     const guard = e.guardrails[0]
     const esc = e.escalation[0]
     let out = `${opener} Applying **${e.name}** (v${e.version}), owned by ${e.owner}.\n\n**Recommended steps**\n\n${steps}\n`
     if (e.knowledge[0]) out += `\n**Why:** ${e.knowledge[0]}\n`
     if (guard) out += `\n> ⚠️ **Guardrail:** ${guard}\n`
     if (esc) out += `\n**Escalate when:** ${esc}\n`
-    if (expertise[1]) out += `\nI also drew on **${expertise[1].name}** — ${expertise[1].decisionLogic[0]?.toLowerCase()}\n`
+    if (expertise[1]) out += `\nI also drew on **${expertise[1].name}** — ${decisionStepText(expertise[1].decisionLogic[0])?.toLowerCase()}\n`
     out += `\n${TAKES[model?.provider] || ''}\n\n_This is a recommendation — a qualified person should confirm before acting._`
     return out
   }

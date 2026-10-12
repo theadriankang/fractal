@@ -53,6 +53,10 @@ TOOL = {
                         },
                         "text": {"type": "string", "description": "The line, lightly rewritten as a standalone statement. Keep every number, unit and condition; add nothing."},
                         "quote": {"type": "string", "description": "The exact words, copied verbatim from the USER's messages, that this line is based on."},
+                        "condition": {"type": "string", "description": "field=decisionLogic only: the trigger/condition for this step, e.g. 'CHWST > 7degC for 10min'. Leave empty if not stated or field != decisionLogic."},
+                        "action": {"type": "string", "description": "field=decisionLogic only: the action the expert takes for this step. Leave empty if not stated or field != decisionLogic."},
+                        "reasoning": {"type": "string", "description": "field=decisionLogic only: why this action, if the user explained it. Leave empty if not stated or field != decisionLogic."},
+                        "escalateIf": {"type": "string", "description": "field=decisionLogic only: when this step alone should trigger escalation, if stated. Leave empty otherwise."},
                     },
                     "required": ["field", "text", "quote"],
                 },
@@ -74,6 +78,7 @@ Decide:
 - "new" otherwise, with a domain and topic from the taxonomy.
 
 Every item needs a "quote" copied verbatim from the USER's own words. If you cannot quote the user, leave the item out.
+For field=decisionLogic items, also fill "condition", "action", "reasoning" and "escalateIf" whenever the user actually stated that part — leave any of them empty rather than inventing content. These are a structured breakdown of the same "text" line, not separate facts.
 Only return "new" or "revision" when confidence >= 0.6.
 Always respond by calling the record_knowhow tool."""
 
@@ -108,6 +113,15 @@ async def call_model(req: ExtractRequest, client: anthropic.AsyncAnthropic) -> d
 
 
 # ---------------------------------------------------------------- validation (pure)
+
+def _item_text(x) -> str:
+    """Comparable text for a field entry, whether it's a plain string or a structured DecisionStep."""
+    if isinstance(x, str):
+        return x
+    if isinstance(x, dict):
+        return str(x.get("text") or "")
+    return str(getattr(x, "text", "") or "")
+
 
 def _norm(s: str) -> str:
     s = unicodedata.normalize("NFKC", s).lower()
@@ -173,7 +187,7 @@ def validate(raw: dict | None, req: ExtractRequest, model: str | None = None) ->
         if not e:
             return none("The extractor named an Expertise that doesn't exist.")
         target = Target(domain=e.domain, topic=e.topic, expertiseId=e.id, expertiseName=e.name)
-        existing = {_norm(x) for f in FIELDS for x in getattr(e, f)}
+        existing = {_norm(_item_text(x)) for f in FIELDS for x in getattr(e, f)}
     else:
         n = raw.get("new") or {}
         domain = n.get("domain")
@@ -204,7 +218,14 @@ def validate(raw: dict | None, req: ExtractRequest, model: str | None = None) ->
             dropped += 1
             continue
         seen.add(key)
-        items.append(CaptureItem(field=field, text=text, quote=quote))
+        condition = str(it.get("condition") or "").strip()[:200]
+        action = str(it.get("action") or "").strip()[:200]
+        reasoning = str(it.get("reasoning") or "").strip()[:300]
+        escalate_if = str(it.get("escalateIf") or it.get("escalate_if") or "").strip()[:200]
+        items.append(CaptureItem(
+            field=field, text=text, quote=quote,
+            condition=condition, action=action, reasoning=reasoning, escalateIf=escalate_if,
+        ))
 
     if not items:
         return none(reason or "Nothing the user said could be verified as reusable know-how.", dropped)

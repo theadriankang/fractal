@@ -9,6 +9,7 @@ import logging
 from typing import Optional
 
 from ..config import settings
+from ..schemas import decision_step_text
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,6 @@ def build_expertise_text(e) -> str:
 
     decision_logic = getattr(e, "decision_logic", None) or []
     if decision_logic:
-        parts.append(" ".join(decision_logic))
+        parts.append(" ".join(decision_step_text(x) for x in decision_logic))
 
     return "\n".join(parts)

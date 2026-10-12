@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..llm import claude
-from ..schemas import ExpertiseIn
+from ..schemas import ExpertiseIn, decision_step_text
 
 router = APIRouter(prefix="/api/writing", tags=["writing"])
 
@@ -87,7 +87,8 @@ body; the application displays supporting references separately."""
 
 
 def reference_text(e: WritingReference) -> str:
-    return "\n".join([e.summary, e.whenToUse, *e.knowledge, *e.decisionLogic, *e.guardrails, *e.escalation])
+    decision_lines = [decision_step_text(s) for s in e.decisionLogic]
+    return "\n".join([e.summary, e.whenToUse, *e.knowledge, *decision_lines, *e.guardrails, *e.escalation])
 
 
 def validate_output(raw: str, req: WritingRequest) -> WritingOutput:

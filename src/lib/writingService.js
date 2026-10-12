@@ -1,9 +1,10 @@
 import { USE_MOCK } from './api'
+import { decisionStepText } from './decisionLogic'
 
 export const MAX_WRITING_REFERENCES = 10
 const FIELDS = ['id', 'name', 'version', 'status', 'owner', 'summary', 'whenToUse', 'knowledge', 'decisionLogic', 'guardrails', 'escalation']
 export const writingReference = (e) => Object.fromEntries(FIELDS.map((field) => [field, e[field]]))
-const referenceParts = (e) => [e.summary, e.whenToUse, ...e.knowledge, ...e.decisionLogic, ...e.guardrails, ...e.escalation]
+const referenceParts = (e) => [e.summary, e.whenToUse, ...e.knowledge, ...e.decisionLogic.map(decisionStepText), ...e.guardrails, ...e.escalation]
 
 export function validateWritingRequest(request) {
   if (!['summary', 'email'].includes(request.mode)) throw new Error('Choose a summary or an email draft.')

@@ -1,5 +1,6 @@
 // Fictional testing fixtures, not operational or regulatory guidance.
 // Each row supplies scenario-specific content; metadata is deterministic.
+import { normalizeExpertiseDecisionLogic } from '../lib/decisionLogic'
 const groups = [
   ['Technical Services', 'Chillers & HVAC', [
     ['ahu-airflow', 'AHU Airflow and Filter Fault Diagnosis', 'Office,Retail', 'ahu,airflow,filter,vav,stuffy', 'Separate local airflow restrictions from central cooling faults.', 'Low airflow or stuffy rooms despite normal chilled-water temperature.', 'Compare filter pressure drop with the commissioned baseline.|A closed VAV damper can mimic an AHU capacity fault.', 'Confirm affected zones and occupancy.|Compare supply airflow, filter pressure and damper position with baseline.|Ask the duty engineer to inspect filters and actuators; verify recovery.', 'Do not bypass interlocks or increase fan speed beyond the approved operating envelope.', 'Persistent loss of ventilation → Chief Engineer.', 'exp-chiller-fault,exp-tenant-complaint'],
@@ -90,7 +91,7 @@ const owners = {
 const split = (value, separator = '|') => value.split(separator)
 const date = (month, day) => new Date(`2026-${month}-${String(day).padStart(2, '0')}T00:00:00Z`).toISOString()
 
-export const PORTFOLIO_EXPERTISE = groups.flatMap(([domain, topic, rows]) => rows.map((row) => {
+export const PORTFOLIO_EXPERTISE = normalizeExpertiseDecisionLogic(groups.flatMap(([domain, topic, rows]) => rows.map((row) => {
   const [slug, name, assets, keywords, summary, whenToUse, knowledge, logic, guardrail, escalation, related, status = 'approved'] = row
   const [owner, ownerRole, reviewer] = owners[domain]
   const index = groups.slice(0, groups.findIndex((g) => g[1] === topic)).reduce((n, g) => n + g[2].length, 0) + rows.indexOf(row)
@@ -121,7 +122,7 @@ export const PORTFOLIO_EXPERTISE = groups.flatMap(([domain, topic, rows]) => row
       ...(index % 4 === 0 ? [{ user: 'Demo reviewer', rating: 'down', comment: 'Include the site-specific evidence reference in the close-out record.', date: updatedAt }] : []),
     ] : [],
   }
-}))
+})))
 
 export const PORTFOLIO_PROPOSALS = [
   {

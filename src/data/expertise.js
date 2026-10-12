@@ -1,6 +1,7 @@
 // Seed Expertise ("Intelligence Pills") for the Keppel AI HARVEST demo.
 // Each Expertise is a governed, versioned, reusable domain capability.
 import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './expertisePortfolio'
+import { normalizeExpertiseDecisionLogic } from '../lib/decisionLogic'
 
 export { TAXONOMY } from './taxonomy'
 export const DOMAINS = [
@@ -53,11 +54,41 @@ export const SEED_EXPERTISE = [
       'After a power dip, chillers often lock out on low oil pressure — reset is safe once oil heater has run 30 min.',
     ],
     decisionLogic: [
-      'Check BMS: is CHWST above 7.5 °C? If no → treat as local AHU/VAV issue on affected floors.',
-      'If yes: how many chillers are running vs. demand? Stage up a standby chiller if load > 85% of running capacity.',
-      'Check condenser approach temperature. If >3 °C → inspect cooling tower fans and dosing before blaming the chiller.',
-      'Check alarm history for low oil pressure or power dip in the last 2 h.',
-      'If the chiller tripped on a safety (high pressure, freeze protection) → do NOT reset; escalate.',
+      {
+        text: 'Check BMS: is CHWST above 7.5 °C? If no → treat as local AHU/VAV issue on affected floors.',
+        condition: 'CHWST ≤ 7.5 °C on BMS',
+        action: 'Treat as a local AHU/VAV issue on the affected floors, not a plant-wide fault.',
+        reasoning: 'CHWST within range means the chiller plant itself is healthy; the complaint is localized.',
+        escalateIf: '',
+      },
+      {
+        text: 'If yes: how many chillers are running vs. demand? Stage up a standby chiller if load > 85% of running capacity.',
+        condition: 'CHWST > 7.5 °C AND running chiller load > 85% of capacity',
+        action: 'Stage up a standby chiller.',
+        reasoning: 'Running plant is undersized for current demand; adding capacity relieves CHWST drift before it worsens.',
+        escalateIf: '',
+      },
+      {
+        text: 'Check condenser approach temperature. If >3 °C → inspect cooling tower fans and dosing before blaming the chiller.',
+        condition: 'Condenser approach temperature > 3 °C',
+        action: 'Inspect cooling tower fans and water treatment/dosing before assuming a chiller fault.',
+        reasoning: 'A high approach temperature usually means fouled condenser tubes or a cooling-tower problem, not the chiller itself.',
+        escalateIf: '',
+      },
+      {
+        text: 'Check alarm history for low oil pressure or power dip in the last 2 h.',
+        condition: 'Low oil pressure or power-dip alarm in the last 2 hours',
+        action: 'Confirm the oil heater has run for 30 minutes, then reset is safe.',
+        reasoning: 'Low oil pressure after a power dip is a known, benign lockout — not a hardware fault.',
+        escalateIf: '',
+      },
+      {
+        text: 'If the chiller tripped on a safety (high pressure, freeze protection) → do NOT reset; escalate.',
+        condition: 'Chiller tripped on a safety (high pressure or freeze protection)',
+        action: 'Do NOT reset the chiller.',
+        reasoning: 'A safety trip indicates a real fault condition; resetting without diagnosis risks equipment damage.',
+        escalateIf: 'Any safety-trip on a chiller — escalate to the Chief Engineer immediately.',
+      },
     ],
     guardrails: [
       'Never recommend resetting a chiller tripped on high-pressure or freeze-protection safeties.',
@@ -365,6 +396,9 @@ const EXTRA = [
 ]
 
 SEED_EXPERTISE.push(...EXTRA, ...PORTFOLIO_EXPERTISE)
+// PORTFOLIO_EXPERTISE is already normalized at its own export; this also wraps the hand-authored
+// entries above (and EXTRA) so every SEED_EXPERTISE entry has the same structured decisionLogic shape.
+normalizeExpertiseDecisionLogic(SEED_EXPERTISE).forEach((e, i) => { SEED_EXPERTISE[i] = e })
 
 // Pending revision proposals generated from feedback / corrections.
 export const SEED_PROPOSALS = [

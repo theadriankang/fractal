@@ -7,6 +7,7 @@ import { useStore, queueFor } from '../store'
 import { domainGradient } from '../data/taxonomy'
 import { Breadcrumb } from './ExpertiseLayout'
 import { StatusBadge, timeAgo } from '../components/ui'
+import { decisionStepText } from '../lib/decisionLogic'
 
 // Where a captured item came from: the expert's own words + the extractor's confidence.
 function Provenance({ sources, capture }) {
@@ -68,8 +69,8 @@ function ProposalCard({ p }) {
             {Object.entries(p.changes).map(([field, { add = [], remove = [] }]) => (
               <div key={field}>
                 <p className="mb-1 font-sans text-xs font-medium text-gray-500">{FIELD_LABELS[field] || field}</p>
-                {remove.map((r, i) => <p key={'r' + i} className="text-red-500">− {r}</p>)}
-                {add.map((a, i) => <p key={'a' + i} className="text-emerald-500">+ {a}</p>)}
+                {remove.map((r, i) => <p key={'r' + i} className="text-red-500">− {decisionStepText(r)}</p>)}
+                {add.map((a, i) => <p key={'a' + i} className="text-emerald-500">+ {decisionStepText(a)}</p>)}
               </div>
             ))}
           </div>

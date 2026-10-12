@@ -15,6 +15,7 @@ import { Breadcrumb } from './ExpertiseLayout'
 import { canEdit, contributeBlock, canGovern, reviewBlock, deleteBlock } from '../lib/permissions'
 import { helpfulStats, fmtRate } from '../lib/ratings'
 import { readiness } from '../lib/readiness'
+import { itemKey, decisionStepText, isStructuredStep } from '../lib/decisionLogic'
 
 const LIST_SECTIONS = [
   { key: 'knowledge', id: 'knowledge', title: 'Knowledge & heuristics', hint: 'What an expert knows that a newcomer doesn\'t. One per line.' },
@@ -31,7 +32,7 @@ function download(name, text, type) {
   URL.revokeObjectURL(url)
 }
 function toMarkdown(e) {
-  const list = (xs, ordered) => xs.map((x, i) => `${ordered ? `${i + 1}.` : '-'} ${x}`).join('\n') || '_None_'
+  const list = (xs, ordered) => xs.map((x, i) => `${ordered ? `${i + 1}.` : '-'} ${decisionStepText(x)}`).join('\n') || '_None_'
   return `---
 name: ${e.name}
 domain: ${e.domain}
@@ -75,8 +76,9 @@ function diffFields(from, to) {
   for (const f of CONTENT_FIELDS) {
     const a = from[f], b = to[f]
     if (Array.isArray(a)) {
-      const removed = a.filter((x) => !b.includes(x))
-      const added = b.filter((x) => !a.includes(x))
+      const bKeys = new Set(b.map(itemKey)), aKeys = new Set(a.map(itemKey))
+      const removed = a.filter((x) => !bKeys.has(itemKey(x)))
+      const added = b.filter((x) => !aKeys.has(itemKey(x)))
       if (removed.length || added.length) out.push({ field: f, removed, added })
     } else if (a !== b) out.push({ field: f, removed: a ? [a] : [], added: b ? [b] : [] })
   }
@@ -91,8 +93,8 @@ function Diff({ changes }) {
       {changes.map((c) => (
         <div key={c.field}>
           <p className="mb-0.5 font-sans text-xs font-medium text-gray-500">{FIELD_NAME[c.field]}</p>
-          {c.removed.map((x, i) => <p key={'r' + i} className="text-red-500">− {x}</p>)}
-          {c.added.map((x, i) => <p key={'a' + i} className="text-emerald-500">+ {x}</p>)}
+          {c.removed.map((x, i) => <p key={'r' + i} className="text-red-500">− {decisionStepText(x)}</p>)}
+          {c.added.map((x, i) => <p key={'a' + i} className="text-emerald-500">+ {decisionStepText(x)}</p>)}
         </div>
       ))}
     </div>
@@ -114,16 +116,31 @@ function ListView({ items, ordered, tone }) {
   const marker = { red: 'bg-red-500', amber: 'bg-amber-500' }[tone] || 'bg-gray-400'
   return (
     <ol className="mt-3 space-y-2.5">
-      {items.map((x, i) => (
-        <li key={i} className="flex gap-3 text-[15px] leading-relaxed text-gray-700 dark:text-gray-300">
-          {ordered ? (
-            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{i + 1}</span>
-          ) : (
-            <span className={`mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full ${marker}`} />
-          )}
-          <span>{x}</span>
-        </li>
-      ))}
+      {items.map((x, i) => {
+        const structured = ordered && isStructuredStep(x)
+        return (
+          <li key={i} className="flex gap-3 text-[15px] leading-relaxed text-gray-700 dark:text-gray-300">
+            {ordered ? (
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{i + 1}</span>
+            ) : (
+              <span className={`mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full ${marker}`} />
+            )}
+            {structured ? (
+              <div className="flex-1">
+                <p>{x.text}</p>
+                <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[13px] text-gray-500 dark:text-gray-400">
+                  {x.condition && (<><dt className="font-medium">If</dt><dd>{x.condition}</dd></>)}
+                  {x.action && (<><dt className="font-medium">Then</dt><dd>{x.action}</dd></>)}
+                  {x.reasoning && (<><dt className="font-medium">Because</dt><dd>{x.reasoning}</dd></>)}
+                  {x.escalateIf && (<><dt className="font-medium text-amber-600 dark:text-amber-400">Escalate if</dt><dd>{x.escalateIf}</dd></>)}
+                </dl>
+              </div>
+            ) : (
+              <span>{decisionStepText(x)}</span>
+            )}
+          </li>
+        )
+      })}
     </ol>
   )
 }
@@ -413,7 +430,15 @@ export default function ExpertiseDetail() {
   const idx = order.findIndex((x) => x.id === e.id)
   const prev = order[idx - 1], next = order[idx + 1]
   const set = (patch) => setDraft({ ...draft, ...patch })
-  const setList = (k, v) => set({ [k]: v.split('\n').map((s) => s.trim()).filter(Boolean) })
+  const setList = (k, v) => {
+    const lines = v.split('\n').map((s) => s.trim()).filter(Boolean)
+    const original = draft[k]
+    const originalText = original.map(decisionStepText)
+    // Nothing actually edited (e.g. a focus/blur with no change) — keep structured entries as-is
+    // instead of flattening them to plain text just because they passed through the textarea.
+    if (lines.length === originalText.length && lines.every((l, i) => l === originalText[i])) return
+    set({ [k]: lines })
+  }
 
   const cancel = () => { setParams({}); setDraft(null) }
   const save = () => {
@@ -421,7 +446,8 @@ export default function ExpertiseDetail() {
     if (e.status === 'approved') {
       const changes = {}
       for (const f of ['knowledge', 'decisionLogic', 'guardrails', 'escalation']) {
-        const add = draft[f].filter((x) => !e[f].includes(x)), remove = e[f].filter((x) => !draft[f].includes(x))
+        const draftKeys = new Set(draft[f].map(itemKey)), liveKeys = new Set(e[f].map(itemKey))
+        const add = draft[f].filter((x) => !liveKeys.has(itemKey(x))), remove = e[f].filter((x) => !draftKeys.has(itemKey(x)))
         if (add.length || remove.length) changes[f] = { add, remove }
       }
       updateExpertise(e.id, meta)
@@ -605,7 +631,7 @@ export default function ExpertiseDetail() {
             {editing ? (
               <>
                 <p className="mb-1.5 mt-1 text-xs text-gray-500">{s.hint}</p>
-                <textarea rows={Math.max(3, draft[s.key].length + 1)} className="input resize-y leading-relaxed" defaultValue={draft[s.key].join('\n')} onBlur={(ev) => setList(s.key, ev.target.value)} />
+                <textarea rows={Math.max(3, draft[s.key].length + 1)} className="input resize-y leading-relaxed" defaultValue={draft[s.key].map(decisionStepText).join('\n')} onBlur={(ev) => setList(s.key, ev.target.value)} />
               </>
             ) : (
               <ListView items={e[s.key]} ordered={s.ordered} tone={s.tone} />

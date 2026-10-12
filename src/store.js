@@ -13,6 +13,7 @@ import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, 
 import { buildExtractRequest, fromKeywordDetector, CAPTURE_MIN_WORDS } from './lib/capture'
 import { readiness } from './lib/readiness'
 import { helpfulStats, responseKey, upsertFeedback } from './lib/ratings'
+import { itemKey } from './lib/decisionLogic'
 
 const uid = (p = 'id') => `${p}-${Math.random().toString(36).slice(2, 9)}`
 const now = () => new Date().toISOString()
@@ -26,6 +27,21 @@ let _loadFromBackendInFlight = null
 // a real `Authorization: Bearer` header instead of the old unverified X-User-Email header.
 const withToken = (u, tokens) => (u ? { ...u, accessToken: tokens?.[u.id]?.accessToken } : u)
 const snapshot = (e) => Object.fromEntries(CONTENT_FIELDS.map((f) => [f, structuredClone(e[f])]))
+
+// Builds a decisionLogic entry from a reviewed capture-card item: a plain string when no
+// structured breakdown was captured, or a structured object (mirrors backend DecisionStep)
+// when the extractor (or the user, editing the card) filled in condition/action/reasoning/
+// escalateIf. Keeps every other field's entries as plain trimmed text, unchanged.
+const buildFieldEntry = (field, x) => {
+  const text = x.text.trim()
+  if (field !== 'decisionLogic') return text
+  const condition = (x.condition || '').trim()
+  const action = (x.action || '').trim()
+  const reasoning = (x.reasoning || '').trim()
+  const escalateIf = (x.escalateIf || '').trim()
+  if (!condition && !action && !reasoning && !escalateIf) return text
+  return { text, condition, action, reasoning, escalateIf }
+}
 
 const bumpVersion = (v) => {
   const n = parseFloat(v || '0')
@@ -612,7 +628,7 @@ export const useStore = create(
         const items = (edits.items || det.items).filter((x) => x.include !== false && x.text.trim())
         const all = [...items, ...(edits.extras || []).filter((x) => x.text.trim()).map((x) => ({ ...x, quote: null }))]
         if (!all.length) { get().showToast('Tick at least one line to save'); return null }
-        const pick = (f) => all.filter((x) => x.field === f).map((x) => x.text.trim())
+        const pick = (f) => all.filter((x) => x.field === f).map((x) => buildFieldEntry(f, x))
         const quotes = items.map((x) => x.quote).filter(Boolean)
         const capture = { confidence: det.confidence, reason: det.reason, detector: det.source || 'keyword', capturedBy: user.name }
         const source = {
@@ -633,9 +649,10 @@ export const useStore = create(
         } else {
           const changes = {}
           for (const x of all) {
-            if ((target[x.field] || []).includes(x.text.trim())) continue
+            const entry = buildFieldEntry(x.field, x)
+            if ((target[x.field] || []).some((cur) => itemKey(cur) === itemKey(entry))) continue
             changes[x.field] ??= { add: [], remove: [] }
-            changes[x.field].add.push(x.text.trim())
+            if (!changes[x.field].add.some((cur) => itemKey(cur) === itemKey(entry))) changes[x.field].add.push(entry)
           }
           if (!Object.keys(changes).length) { get().showToast(`${target.name} already contains these lines`); return null }
           const p = { id: uid('prop'), expertiseId: target.id, type: 'revision', createdAt: now(), author: `${user.name} (captured from chat)`, authorId: user.id,
@@ -788,7 +805,11 @@ export const useStore = create(
         if (block) { get().showToast(block); return }
         const patch = {}
         for (const [field, { add = [], remove = [] }] of Object.entries(p.changes)) {
-          patch[field] = [...e[field].filter((x) => !remove.includes(x)), ...add]
+          const removeKeys = new Set(remove.map(itemKey))
+          const current = (e[field] || []).filter((x) => !removeKeys.has(itemKey(x)))
+          const currentKeys = new Set(current.map(itemKey))
+          const addition = add.filter((x) => !currentKeys.has(itemKey(x)))
+          patch[field] = [...current, ...addition]
         }
         const merged = { ...e, ...patch }
         const version = bumpVersion(e.version)
@@ -829,7 +850,7 @@ export const useStore = create(
         for (const l of links) {
           if (l.expertiseId) {
             const e = get().expertise.find((x) => x.id === l.expertiseId)
-            if (!e || (e[l.field] || []).includes(l.entry)) continue
+            if (!e || (e[l.field] || []).some((cur) => itemKey(cur) === itemKey(l.entry))) continue
             if (!byExisting.has(e.id)) byExisting.set(e.id, [])
             byExisting.get(e.id).push(l)
           } else if (l.newExpertise?.name) {
@@ -842,7 +863,7 @@ export const useStore = create(
           const changes = {}
           for (const l of ls) {
             changes[l.field] ??= { add: [], remove: [] }
-            if (!changes[l.field].add.includes(l.entry)) changes[l.field].add.push(l.entry)
+            if (!changes[l.field].add.some((cur) => itemKey(cur) === itemKey(l.entry))) changes[l.field].add.push(l.entry)
           }
           proposals.push({
             id: uid('prop'),

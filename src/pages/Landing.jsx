@@ -5,6 +5,7 @@ import { SEED_EXPERTISE } from '../data/expertise'
 import FractalTree from '../components/landing/FractalTree'
 import GrowthSteps from '../components/landing/GrowthSteps'
 import RouterDemo from '../components/landing/RouterDemo'
+import { decisionStepText } from '../lib/decisionLogic'
 
 // Public landing page, rendered outside the app shell (no sidebar).
 // z-index scale on this page: nav 20, sticky step visual 10, everything else auto.
@@ -134,7 +135,7 @@ function Expertise() {
             {EXP.decisionLogic.slice(0, 3).map((step, i) => (
               <li key={i} className="grid grid-cols-[1.75rem_1fr] gap-2 text-[15px] leading-relaxed">
                 <span className="font-mono text-sm text-gray-500">{i + 1}.</span>
-                <span>{clean(step)}</span>
+                <span>{clean(decisionStepText(step))}</span>
               </li>
             ))}
           </ol>

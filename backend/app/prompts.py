@@ -2,7 +2,7 @@
 
 from html import escape
 
-from .schemas import ExpertiseIn, RoutingIn
+from .schemas import ExpertiseIn, RoutingIn, decision_step_text
 
 INTRO = "You are Fractal, an operations assistant for commercial real estate teams (offices, data centres, logistics, retail)."
 
@@ -32,7 +32,7 @@ def _block(e: ExpertiseIn) -> str:
     lines.append("Knowledge:")
     lines += [f"- {k}" for k in e.knowledge]
     lines.append("Decision logic (in order):")
-    lines += [f"{i}. {s}" for i, s in enumerate(e.decisionLogic, start=1)]
+    lines += [f"{i}. {decision_step_text(s)}" for i, s in enumerate(e.decisionLogic, start=1)]
     lines.append("Guardrails (never violate):")
     lines += [f"- {g}" for g in e.guardrails]
     lines.append("Escalate when:")

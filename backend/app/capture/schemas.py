@@ -2,7 +2,9 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from ..schemas import DecisionStep, coerce_decision_logic
 
 Field_ = Literal["knowledge", "decisionLogic", "guardrails", "escalation"]
 FIELDS: tuple[str, ...] = ("knowledge", "decisionLogic", "guardrails", "escalation")
@@ -37,9 +39,14 @@ class ExpertiseBrief(BaseModel):
     status: str = "approved"
     summary: str = ""
     knowledge: list[str] = []
-    decisionLogic: list[str] = []
+    decisionLogic: list[DecisionStep] = []
     guardrails: list[str] = []
     escalation: list[str] = []
+
+    @field_validator("decisionLogic", mode="before")
+    @classmethod
+    def _coerce_decision_logic(cls, v):
+        return coerce_decision_logic(v)
 
 
 class ExtractRequest(BaseModel):
@@ -54,6 +61,12 @@ class CaptureItem(BaseModel):
     field: Field_
     text: str
     quote: str  # the user's own words this line is based on
+    # Structured breakdown, filled only when field == "decisionLogic"; the single grounded
+    # `text`/`quote` pair above still anchors the whole step, these just unpack its shape.
+    condition: str = ""
+    action: str = ""
+    reasoning: str = ""
+    escalateIf: str = ""
 
 
 class Target(BaseModel):

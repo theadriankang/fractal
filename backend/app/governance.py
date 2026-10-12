@@ -156,15 +156,33 @@ def proposal_to_out(p: Proposal) -> ProposalOut:
     )
 
 
+def _item_key(x) -> str:
+    """Comparable identity for a list-field entry: the plain string itself, or a structured
+    DecisionStep's ``text`` (its stable identity — see schemas.DecisionStep). Dict or object
+    shape both supported since this runs against raw DB JSON (dicts) and Pydantic models alike."""
+    if isinstance(x, str):
+        return x
+    if isinstance(x, dict):
+        return str(x.get("text") or "")
+    return str(getattr(x, "text", "") or "")
+
+
 def apply_changes(e: Expertise, changes: dict) -> None:
-    """Merge a proposal's {field: {add, remove}} diff into the Expertise."""
+    """Merge a proposal's {field: {add, remove}} diff into the Expertise.
+
+    ``remove`` entries are plain text (the identity key); ``add`` entries may be plain
+    strings or structured dicts (decisionLogic). Matching/dedup is always by identity key,
+    never by raw equality, so this works uniformly across plain-string and structured fields.
+    """
     for field, diff in (changes or {}).items():
         attr = LIST_FIELDS.get(field)
         if not attr:
             continue
-        remove = set(diff.get("remove") or [])
-        current = [x for x in (getattr(e, attr) or []) if x not in remove]
-        setattr(e, attr, current + [x for x in diff.get("add") or [] if x not in current])
+        remove_keys = {_item_key(x) for x in (diff.get("remove") or [])}
+        current = [x for x in (getattr(e, attr) or []) if _item_key(x) not in remove_keys]
+        current_keys = {_item_key(x) for x in current}
+        addition = [x for x in diff.get("add") or [] if _item_key(x) not in current_keys]
+        setattr(e, attr, current + addition)
 
 
 # --- audit -------------------------------------------------------------------
