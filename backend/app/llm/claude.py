@@ -23,15 +23,17 @@ def is_configured() -> bool:
     return bool(settings.anthropic_api_key)
 
 
-async def stream_reply(model_key: str, system: str, messages: list[dict], *, max_tokens: int = 64000) -> AsyncIterator[tuple[str, dict]]:
+async def stream_reply(model_key: str, system: str, messages: list[dict], *, max_tokens: int | None = None) -> AsyncIterator[tuple[str, dict]]:
     """Yields ("delta", {"text"}) for each text chunk, then ("done", {...}) or ("error", {...})."""
     spec = MODELS[model_key]
     params: dict = {
         "model": spec["model"],
-        "max_tokens": max_tokens,
+        "max_tokens": max_tokens or settings.claude_max_output_tokens,
         "system": system,
         "messages": messages,
         "output_config": {"effort": settings.claude_effort},
+        # Caches the conversation prefix, so attached documents resent on later turns bill at cache-read rates.
+        "cache_control": {"type": "ephemeral"},
     }
     if spec["fallbacks"]:
         params |= {"betas": [FALLBACK_BETA], "fallbacks": "default"}

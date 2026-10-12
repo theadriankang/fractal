@@ -49,7 +49,7 @@ export default function CaptureCard({ chatId, msg }) {
   }, [det, items, extras, meta.name])
 
   if (msg.detectionState === 'checking') {
-    if (!isContributor(user)) return null
+    if (!isContributor(user) || (det?.capturedBy && det.capturedBy !== user.id)) return null
     return (
       <p className="mt-3 flex items-center gap-2 text-xs text-gray-500 animate-fadeIn">
         <Loader2 size={13} className="animate-spin" /> Checking whether you shared reusable know-how…
@@ -57,6 +57,8 @@ export default function CaptureCard({ chatId, msg }) {
     )
   }
   if (!det || msg.detectionState === 'dismissed') return null
+  // Only the person who said it may save it; anyone else viewing the chat sees nothing to act on.
+  if (msg.detectionState !== 'saved' && det.capturedBy && det.capturedBy !== user.id) return null
 
   if (msg.detectionState === 'saved') {
     const isNew = det.kind === 'new'

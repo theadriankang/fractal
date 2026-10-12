@@ -1,12 +1,35 @@
 import json
 
-import anthropic
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+import logging
 
+import anthropic
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+from .. import files
+from ..db import get_db
 from ..llm import claude, registry
+from ..llm import router as auto_router
+from ..models import Expertise
 from ..prompts import build_system_prompt
-from ..schemas import ChatStreamRequest
+from ..schemas import ChatStreamRequest, ExpertiseIn, RouteOut, RouteRequest
+
+logger = logging.getLogger(__name__)
+
+
+def _friendly_error(model_id: str, e: Exception) -> str:
+    text = str(e).lower()
+    if "credit" in text or "afford" in text or "402" in text:
+        return f"{model_id} is out of credit on OpenRouter. Try another model or top up the key."
+    if "not a valid model" in text or "deprecated" in text or "notfound" in text:
+        return f"{model_id} isn't available from the provider right now. Try another model."
+    if "rate" in text and "limit" in text:
+        return f"{model_id} is busy (provider rate limit). Try again in a moment."
+    if "timeout" in text or "timed out" in text:
+        return f"{model_id} took too long to respond. Try again."
+    return f"{model_id} couldn't answer this time. Try again or pick another model."
+
 
 router = APIRouter(prefix="/api")
 
@@ -15,11 +38,21 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def to_claude_messages(turns) -> list[dict]:
-    """Drops empty turns and any leading assistant turns; the API needs user-first history."""
-    msgs = [{"role": t.role, "content": t.content} for t in turns if t.content.strip()]
-    while msgs and msgs[0]["role"] != "user":
-        msgs.pop(0)
+def to_model_messages(turns, native_files: bool) -> list[dict]:
+    """Drops empty turns and any leading assistant turns (the API needs user-first history),
+    then adds each user turn's attachments: content blocks for Claude, extracted text otherwise."""
+    kept = [t for t in turns if t.content.strip()]
+    while kept and kept[0].role != "user":
+        kept.pop(0)
+    msgs = []
+    for t in kept:
+        content = t.content
+        if t.role == "user" and t.files:
+            if native_files:
+                content = [*files.claude_blocks(t.files), {"type": "text", "text": t.content}]
+            else:
+                content = f"{files.text_attachments(t.files)}\n\n{t.content}"
+        msgs.append({"role": t.role, "content": content})
     return msgs
 
 
@@ -32,12 +65,39 @@ def models():
     ]
 
 
+@router.post("/route", response_model=RouteOut)
+async def route_prompt(req: RouteRequest):
+    """Smart Auto routing: classifies the prompt and returns the best-suited model.
+
+    Tries an LLM classification call first; falls back to keyword rules if the
+    classifier is slow, errors, or Claude isn't configured (see llm/router.py).
+    """
+    if not req.prompt.strip():
+        raise HTTPException(400, "prompt is required")
+    return await auto_router.route(req.prompt)
+
+
+@router.get("/routing")
+def routing_table():
+    """Category -> model table that Auto routing uses (Settings -> Auto routing)."""
+    return {
+        "categories": auto_router.CATEGORIES,
+        "table": [
+            {"category": c, "modelId": m}
+            for c, m in auto_router.CATEGORY_MODEL.items()
+        ],
+    }
+
+
 @router.post("/chat/stream")
-async def chat_stream(req: ChatStreamRequest):
+async def chat_stream(req: ChatStreamRequest, db: Session = Depends(get_db)):
     """Streams one model's answer as Server-Sent Events: meta, delta*, then done or error.
 
     Accepts any available model id from the catalogue plus "auto"
     (resolves to claude-sonnet for now).
+
+    Chat safety: Expertise is loaded from the database by id (approved only)
+    instead of trusting the content the browser sends.
     """
     is_auto = req.model == "auto"
     resolved_id = registry.resolve_auto(req.model)
@@ -47,13 +107,34 @@ async def chat_stream(req: ChatStreamRequest):
     if not registry.is_available(entry):
         raise HTTPException(400, f"Model '{req.model}' is not available (no API key configured).")
 
-    messages = to_claude_messages(req.messages)
+    messages = to_model_messages(req.messages, native_files=entry.provider == "anthropic")
     if not messages or messages[-1]["role"] != "user":
         raise HTTPException(400, "The conversation must end with a user message.")
 
     # Only approved Expertise may reach a model prompt (PROJECT_CONTEXT rule 4).
-    applied = [e for e in req.expertise if e.status == "approved"]
-    system = build_system_prompt(applied)
+    # Load from the database by id — never trust browser-sent content.
+    exp_ids = [e.id for e in req.expertise if e.id]
+    applied: list[ExpertiseIn] = []
+    if exp_ids:
+        rows = db.query(Expertise).filter(
+            Expertise.id.in_(exp_ids), Expertise.status == "approved"
+        ).all()
+        applied = [
+            ExpertiseIn(
+                id=e.id, name=e.name, version=e.version, status=e.status,
+                owner=e.owner or "", whenToUse=e.when_to_use or "",
+                knowledge=e.knowledge or [], decisionLogic=e.decision_logic or [],
+                guardrails=e.guardrails or [], escalation=e.escalation or [],
+            )
+            for e in rows
+        ]
+    system = build_system_prompt(
+        applied,
+        model_display_name=entry.display_name,
+        provider_name=entry.provider_name,
+        provider_model=entry.model,
+        routing=req.routing,
+    )
 
     async def events():
         yield sse("meta", {
@@ -74,7 +155,9 @@ async def chat_stream(req: ChatStreamRequest):
             yield sse("error", {"message": "The backend could not reach the Claude API."})
         except Exception as e:
             # Catch-all so provider errors become an error event, never a crash.
-            yield sse("error", {"message": f"{entry.id} request failed: {e}"})
+            # Show a short, readable reason; the full error goes to the server log.
+            logger.warning("%s request failed: %s", entry.id, e)
+            yield sse("error", {"message": _friendly_error(entry.id, e)})
 
     return StreamingResponse(
         events(),

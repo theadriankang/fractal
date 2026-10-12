@@ -8,6 +8,8 @@ psycopg[binary]>=3.2.3
 pydantic>=2.9.2
 pydantic-settings==2.15.0
 python-dotenv>=1.0.1
+pyjwt[crypto]>=2.9.0
+certifi>=2024.8.30  # JWKS fetch in app/auth.py uses this CA bundle explicitly — see its comment
 
 # --- Supabase Admin API (for seed.py creating demo users) ---
 supabase>=2.7.4
@@ -19,3 +21,15 @@ anthropic==1.13.0
 # --- Multi-model chat (OpenRouter + OpenAI-compatible providers) ---
 litellm>=1.74.0
 PyYAML>=6.0.2
+
+# --- Chat attachments (POST /api/files) ---
+pypdf==6.20.0
+python-docx==1.2.0
+python-multipart==0.0.32
+
+# --- Semantic Expertise retrieval (local embeddings, no API key) ---
+fastembed>=0.9.0
+numpy>=2.0.0
+
+# --- Tests ---
+pytest>=8.0.0

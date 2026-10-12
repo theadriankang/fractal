@@ -16,3 +16,4 @@ venv/
 __pycache__/
 *.pyc
 backend/seed_data.json
+backend/uploads/

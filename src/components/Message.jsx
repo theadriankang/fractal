@@ -60,11 +60,12 @@ function ExpertiseUsed({ refs }) {
   )
 }
 
-function ResponseCard({ chatId, msg, idx, compare }) {
+function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
   const r = msg.responses[idx]
   const { regenerate, rateResponse, user, expertise } = useStore()
   const usedDomain = expertise.find((e) => e.id === r.expertise?.[0]?.id)?.domain
-  const correctionBlock = usedDomain ? contributeBlock(user, usedDomain) : null
+  // Corrections become proposals, so they follow the contribution rule; anyone can still rate.
+  const correctionBlock = usedDomain ? contributeBlock(user, usedDomain) : (user.role !== 'contributor' ? contributeBlock(user) : null)
   const [copied, setCopied] = useState(false)
   const [correcting, setCorrecting] = useState(false)
   const [correction, setCorrection] = useState('')
@@ -95,21 +96,25 @@ function ResponseCard({ chatId, msg, idx, compare }) {
           <ExpertiseUsed refs={r.expertise} />
           <div className="mt-2 flex items-center gap-0.5 text-gray-500">
             <button className="icon-btn" onClick={copy} title="Copy">{copied ? <Check size={15} /> : <Copy size={15} />}</button>
-            <button className="icon-btn" onClick={() => regenerate(chatId, msg.id, idx)} title="Regenerate"><RefreshCw size={15} /></button>
+            {!readOnly && <button className="icon-btn" onClick={() => regenerate(chatId, msg.id, idx)} title="Regenerate"><RefreshCw size={15} /></button>}
+            {!readOnly && (<>
             <button
               className={`icon-btn ${r.rating === 'up' ? 'text-emerald-500' : ''}`}
               onClick={() => rateResponse(chatId, msg.id, idx, 'up')}
-              title="Good response"
+              title={r.rating === 'up' ? 'Remove your rating' : 'Good response'}
+              aria-pressed={r.rating === 'up'}
             >
               <ThumbsUp size={15} fill={r.rating === 'up' ? 'currentColor' : 'none'} />
             </button>
             <button
               className={`icon-btn ${r.rating === 'down' ? 'text-red-500' : ''}`}
-              onClick={() => setCorrecting(true)}
-              title="Bad response — suggest a correction"
+              onClick={() => (r.rating === 'down' ? rateResponse(chatId, msg.id, idx, 'down') : setCorrecting(true))}
+              title={r.rating === 'down' ? 'Remove your rating' : 'Bad response — suggest a correction'}
+              aria-pressed={r.rating === 'down'}
             >
               <ThumbsDown size={15} fill={r.rating === 'down' ? 'currentColor' : 'none'} />
             </button>
+            </>)}
           </div>
         </>
       )}
@@ -127,23 +132,23 @@ function ResponseCard({ chatId, msg, idx, compare }) {
                 ? `Your feedback is recorded on the Expertise used. ${correctionBlock}`
                 : 'Your correction goes to the Review Queue as a proposed revision of the Expertise used. Nothing changes until a reviewer approves it.'}
           </p>
-          <textarea
+          {!correctionBlock && <textarea
             autoFocus
             rows={2}
             className="input resize-none"
             placeholder="e.g. You should also check the CHW pump VSD before staging up a chiller."
             value={correction}
             onChange={(e) => setCorrection(e.target.value)}
-          />
+          />}
           <div className="mt-2 flex justify-end gap-2">
-            <button className="btn-ghost" onClick={() => { rateResponse(chatId, msg.id, idx, 'down'); setCorrecting(false) }}>Just 👎</button>
-            <button
+            <button className={correctionBlock ? 'btn-primary' : 'btn-ghost'} onClick={() => { rateResponse(chatId, msg.id, idx, 'down'); setCorrecting(false) }}>{correctionBlock ? 'Rate 👎' : 'Just 👎'}</button>
+            {!correctionBlock && <button
               className="btn-primary"
               disabled={!correction.trim()}
               onClick={() => { rateResponse(chatId, msg.id, idx, 'down', correction); setCorrecting(false); setCorrection('') }}
             >
               Submit correction
-            </button>
+            </button>}
           </div>
         </div>
       )}
@@ -152,14 +157,14 @@ function ResponseCard({ chatId, msg, idx, compare }) {
 }
 
 
-export function AssistantMessage({ chatId, msg }) {
+export function AssistantMessage({ chatId, msg, readOnly = false }) {
   const compare = msg.responses.length > 1
   return (
     <div className="animate-fadeIn">
       <div className={compare ? `grid gap-3 ${msg.responses.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'}` : ''}>
-        {msg.responses.map((_, i) => <ResponseCard key={i} chatId={chatId} msg={msg} idx={i} compare={compare} />)}
+        {msg.responses.map((_, i) => <ResponseCard key={i} chatId={chatId} msg={msg} idx={i} compare={compare} readOnly={readOnly} />)}
       </div>
-      <CaptureCard key={msg.detection ? 'detected' : 'none'} chatId={chatId} msg={msg} />
+      {!readOnly && <CaptureCard key={msg.detection ? 'detected' : 'none'} chatId={chatId} msg={msg} />}
     </div>
   )
 }

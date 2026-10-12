@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
 import SettingsModal from './components/SettingsModal'
@@ -8,9 +8,20 @@ import ExpertiseLayout from './pages/ExpertiseLayout'
 import ExpertiseHome, { ExpertiseDomain } from './pages/ExpertiseHome'
 import ExpertiseDetail from './pages/ExpertiseDetail'
 import ReviewQueue from './pages/ReviewQueue'
+import AuditLog from './pages/AuditLog'
 import MeetingRecorder from './pages/MeetingRecorder'
 import WritingAssistant from './pages/WritingAssistant'
 import Landing from './pages/Landing'
+import Login from './pages/Login'
+import AccessGate from './components/AccessGate'
+
+function LoginRoute() {
+  const user = useStore((s) => s.user)
+  const location = useLocation()
+  const adding = new URLSearchParams(location.search).get('add') === '1'
+  if (user && !adding) return <Navigate to="/" replace />
+  return <Login />
+}
 
 function Toast() {
   const toast = useStore((s) => s.toast)
@@ -23,7 +34,14 @@ function Toast() {
 }
 
 function Shell() {
-  const { sidebarOpen } = useStore()
+  const { sidebarOpen, user, loadFromBackend, refreshModelAvailability } = useStore()
+  const location = useLocation()
+  // Chats, the Library and the Review Queue load from Supabase for whoever is signed in.
+  useEffect(() => { if (user) loadFromBackend() }, [user?.id])
+  // Fetch model availability on app start so the picker and auto-router know which models have keys.
+  useEffect(() => { refreshModelAvailability() }, [])
+  // Signed out → sign-in page, then back to where the person was going.
+  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -37,6 +55,7 @@ function Shell() {
           <Route path="/expertise" element={<ExpertiseLayout />}>
             <Route index element={<ExpertiseHome />} />
             <Route path="review" element={<ReviewQueue />} />
+            <Route path="audit" element={<AuditLog />} />
             <Route path="d/:slug" element={<ExpertiseDomain />} />
             <Route path=":id" element={<ExpertiseDetail />} />
           </Route>
@@ -66,10 +85,13 @@ export default function App() {
 
   return (
     <>
-      <Routes>
-        <Route path="/welcome" element={<Landing />} />
-        <Route path="/*" element={<Shell />} />
-      </Routes>
+      <AccessGate>
+        <Routes>
+          <Route path="/welcome" element={<Landing />} />
+          <Route path="/login" element={<LoginRoute />} />
+          <Route path="/*" element={<Shell />} />
+        </Routes>
+      </AccessGate>
       <Toast />
     </>
   )

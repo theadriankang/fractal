@@ -18,7 +18,7 @@ class CaptureUser(BaseModel):
     it must come from the verified JWT + `profiles` row, never from the request body."""
 
     name: str
-    role: Literal["contributor", "reviewer"]
+    role: Literal["contributor", "reviewer", "intern"]
     domains: list[str] = []
 
 

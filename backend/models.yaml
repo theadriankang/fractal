@@ -39,22 +39,22 @@ models:
 
   - id: grok-4
     provider: xai
-    model: x-ai/grok-4
+    model: x-ai/grok-4.7
 
   - id: grok-fast
     provider: xai
-    model: x-ai/grok-fast
+    model: x-ai/grok-4.3
 
   - id: hunyuan-t1
     provider: tencent
-    model: hunyuan-t1
+    model: tencent/hy3
     # When HUNYUAN_API_KEY is set, this model is called via the OpenAI-compatible
     # endpoint at HUNYUAN_BASE_URL using this exact model name.
     hunyuan_model: hunyuan-t1
 
   - id: hunyuan-turbos
     provider: tencent
-    model: tencent/hunyuan-turbos
+    model: tencent/hunyuan-a13b-instruct
     hunyuan_model: hunyuan-turbos
 
   - id: deepseek-v3

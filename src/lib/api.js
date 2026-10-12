@@ -6,10 +6,35 @@
 
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
+// Where the backend lives. Empty in development (Vite proxies /api to localhost:8000);
+// set VITE_API_BASE to the deployed backend's URL in production.
+export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+
+// Shared demo access code (backend/app/guard.py), entered once on the access screen.
+const ACCESS_KEY = 'fractal-access-code'
+export function getAccessCode() { try { return localStorage.getItem(ACCESS_KEY) || '' } catch { return '' } }
+export function setAccessCode(code) { try { localStorage.setItem(ACCESS_KEY, code) } catch { /* private mode */ } }
+
+/** fetch() for backend paths: adds the base URL and the access code header. */
+export function apiFetch(path, opts = {}) {
+  const code = getAccessCode()
+  const headers = { ...(opts.headers || {}), ...(code ? { 'X-Access-Code': code } : {}) }
+  return fetch(`${API_BASE}${path}`, { ...opts, headers })
+}
+
+/** Asks the backend whether an access code is required and whether the stored one works. */
+export async function checkAccess(code = getAccessCode()) {
+  const res = await fetch(`${API_BASE}/api/access/check`, { headers: code ? { 'X-Access-Code': code } : {} })
+  if (!res.ok) throw new Error(`Backend error (${res.status})`)
+  return res.json()
+}
+
 // Filled from GET /api/models on first load. Unavailable models keep the
 // existing mock fallback so the front end always works, even with no keys.
 let _liveModels = new Set()
+let _modelAvailability = {} // { id: { available, provider } }
 let _fetched = false
+let _backendOnline = false
 let _retryTimer = null
 let _lastRetry = 0
 const _RETRY_MS = 10_000
@@ -17,11 +42,13 @@ const _RETRY_MS = 10_000
 async function refreshLiveModels() {
   if (_fetched) return
   try {
-    const res = await fetch('/api/models')
+    const res = await apiFetch('/api/models')
     if (res.ok) {
       const list = await res.json()
+      _modelAvailability = Object.fromEntries(list.map((m) => [m.id, m]))
       _liveModels = new Set(list.filter((m) => m.available).map((m) => m.id))
       _fetched = true
+      _backendOnline = true
     }
   } catch {
     // Backend offline — leave _liveModels empty; isLive returns false.
@@ -46,6 +73,21 @@ export function isLive(modelId) {
   return _liveModels.has(modelId)
 }
 
+/** True when the backend responded to /api/models at least once. */
+export function backendOnline() {
+  return _backendOnline
+}
+
+/**
+ * Full availability map from GET /api/models.
+ * Returns { id: { available, provider } } or null when the backend hasn't
+ * responded yet (so callers can distinguish "still loading" / "offline"
+ * from "responded — here's the truth").
+ */
+export function getModelAvailability() {
+  return _fetched ? _modelAvailability : null
+}
+
 /** Re-fetch the live model list from the backend (returns a promise). */
 export { refreshLiveModels }
 
@@ -58,7 +100,7 @@ export async function extractKnowhow(body, { timeoutMs = 20000 } = {}) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    const res = await fetch('/api/expertise/extract', {
+    const res = await apiFetch('/api/expertise/extract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -72,6 +114,76 @@ export async function extractKnowhow(body, { timeoutMs = 20000 } = {}) {
   }
 }
 
+// Chat attachments. Limits match backend/app/files.py.
+export const FILE_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg'
+export const MAX_FILES = 5
+export const MAX_FILE_BYTES = 10 * 1024 * 1024
+
+/** Returns an error message for a file the backend would reject, or null. */
+export function checkFile(file) {
+  const ext = '.' + file.name.toLowerCase().split('.').pop()
+  if (!FILE_ACCEPT.split(',').includes(ext)) return 'Unsupported type'
+  if (file.size > MAX_FILE_BYTES) return 'Larger than 10 MB'
+  if (!file.size) return 'Empty file'
+  return null
+}
+
+/** POST /api/files: stores one attachment. Resolves to {id, name, size, kind, mediaType, chars, pages}. */
+export async function uploadFile(file) {
+  const body = new FormData()
+  body.append('file', file)
+  let res
+  try {
+    res = await apiFetch('/api/files', { method: 'POST', body })
+  } catch {
+    throw new Error('Backend offline')
+  }
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `Upload failed (${res.status})`)
+  return data
+}
+
+/**
+ * POST /api/expertise/match — semantic retrieval of approved Expertise.
+ * Returns [{id, name, version, score, reason}] or null if the backend is offline.
+ */
+export async function matchExpertiseBackend(query, attachedIds = [], limit = 3) {
+  if (USE_MOCK) return null
+  try {
+    const res = await apiFetch('/api/expertise/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, attachedIds, limit }),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * POST /api/route — Smart Auto routing. An LLM call classifies the prompt
+ * (coding / analytical / long-document / operational / writing / ...) and
+ * returns the model best suited to it, falling back to keyword rules
+ * server-side if the classifier is slow or Claude isn't configured.
+ * Returns {modelId, category, reason, source} or null if the backend is offline.
+ */
+export async function routeAutoBackend(prompt) {
+  if (USE_MOCK) return null
+  try {
+    const res = await apiFetch('/api/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
 // The Expertise fields the backend's system prompt uses.
 const EXPERTISE_FIELDS = ['id', 'name', 'version', 'status', 'owner', 'whenToUse', 'knowledge', 'decisionLogic', 'guardrails', 'escalation']
 const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, e[f]]))
@@ -81,7 +193,7 @@ const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, 
  * handlers: onMeta({expertise}), onDelta(text), onDone({stopReason, model}), onError(message).
  * Returns an abort function; aborting fires no handler.
  */
-export function streamChat({ model, messages, expertise = [] }, { onMeta, onDelta, onDone, onError }) {
+export function streamChat({ model, messages, expertise = [], routing }, { onMeta, onDelta, onDone, onError }) {
   const ctrl = new AbortController()
 
   ;(async () => {
@@ -94,10 +206,10 @@ export function streamChat({ model, messages, expertise = [] }, { onMeta, onDelt
     }
 
     try {
-      const res = await fetch('/api/chat/stream', {
+      const res = await apiFetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages, expertise: expertise.map(pickExpertise) }),
+        body: JSON.stringify({ model, messages, expertise: expertise.map(pickExpertise), routing }),
         signal: ctrl.signal,
       })
       if (!res.ok) {
@@ -133,4 +245,102 @@ export function streamChat({ model, messages, expertise = [] }, { onMeta, onDelt
   })()
 
   return () => ctrl.abort()
+}
+
+// ---------------------------------------------------------------------------
+// Library, Review Queue and Chats — stored in Supabase through the backend.
+// Until Supabase Auth (BUILD_PROMPTS Prompt 8) the demo account is sent as X-User-Email;
+// backend/seed.py creates a matching profile for every account in src/data/users.js.
+// ---------------------------------------------------------------------------
+
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message)
+    this.status = status // 0 = backend unreachable
+  }
+}
+
+async function request(user, method, path, body) {
+  let res
+  // Prefers a real, verified Supabase session (backend/app/auth.py checks the signature);
+  // falls back to the old unverified X-User-Email header when there's no session yet
+  // (Supabase not configured, or `python seed.py` hasn't created the demo accounts there).
+  const authHeaders = user?.accessToken
+    ? { Authorization: `Bearer ${user.accessToken}` }
+    : user?.email ? { 'X-User-Email': user.email } : {}
+  try {
+    res = await apiFetch(`/api${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    throw new ApiError('Backend offline.', 0)
+  }
+  if (res.status === 204) return null
+  const data = await res.json().catch(() => null)
+  // Vite's proxy answers with a non-JSON 5xx when nothing listens on /api.
+  if (!res.ok) throw new ApiError(typeof data?.detail === 'string' ? data.detail : `Backend error (${res.status}).`, data ? res.status : 0)
+  return data
+}
+
+// Fields an edit may change; status, version, feedback and usage change only through the actions below.
+const EDITABLE = ['name', 'domain', 'topic', 'assetTypes', 'related', 'owner', 'ownerRole', 'keywords', 'summary', 'whenToUse',
+  'knowledge', 'decisionLogic', 'guardrails', 'escalation', 'sources', 'origin']
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
+const enc = encodeURIComponent
+
+const toApiMessage = (m) => ({
+  ...pick(m, ['role', 'files', 'attachedExpertise', 'webSearch', 'detection', 'detectionState', 'detectionResult', 'createdAt']),
+  content: m.content || '',
+  detectionMissing: m.detectionMissing || [],
+  responses: (m.responses || []).map((r) => ({
+    id: r.id, modelId: r.modelId, auto: r.auto, expertiseUsed: r.expertise || [], content: r.content || '', rating: r.rating,
+  })),
+})
+
+const fromApiMessage = ({ responses, ...m }) =>
+  m.role === 'user'
+    ? m
+    : { ...m, responses: responses.map(({ expertiseUsed, ...r }) => ({ ...r, expertise: expertiseUsed, streaming: false })) }
+
+/** A chat from the API in the store's shape; `ownerId` is the signed-in demo account. */
+export const fromApiChat = (c, ownerId) => ({ ...c, ownerId, messages: c.messages.map(fromApiMessage) })
+
+/** Endpoint wrappers acting as `user` (bound when a write is queued, so it keeps its author). */
+export function apiFor(user) {
+  const call = (method, path, body) => request(user, method, path, body)
+  return {
+    listChats: () => call('GET', '/chats'),
+    getChat: (id) => call('GET', `/chats/${enc(id)}`),
+    saveChat: (c) => call('PUT', `/chats/${enc(c.id)}`, { title: c.title, folder: c.folder ?? null, pinned: !!c.pinned }),
+    deleteChat: (id) => call('DELETE', `/chats/${enc(id)}`).catch((e) => { if (e.status !== 404) throw e }),
+    saveMessage: (chatId, m) => call('PUT', `/chats/${enc(chatId)}/messages/${enc(m.id)}`, toApiMessage(m)),
+    rateResponse: (id, body) => call('POST', `/responses/${enc(id)}/rating`, body),
+
+    listExpertise: () => call('GET', '/expertise'),
+    createExpertise: (e) => call('POST', '/expertise', e),
+    updateExpertise: (id, patch) => call('PATCH', `/expertise/${enc(id)}`, pick(patch, EDITABLE)),
+    deleteExpertise: (id) => call('DELETE', `/expertise/${enc(id)}`),
+    recordUsage: (ids) => call('POST', '/expertise/usage', { ids }),
+    // action: submit | approve | reject | deprecate | restore | rollback
+    expertiseAction: (id, action, body) => call('POST', `/expertise/${enc(id)}/${action}`, body),
+
+    listProposals: () => call('GET', '/proposals'),
+    createProposal: (p) => call('POST', '/proposals', p),
+    // action: approve (returns the updated Expertise) | reject
+    proposalAction: (id, action) => call('POST', `/proposals/${enc(id)}/${action}`),
+
+    listAudit: (params = {}) => {
+      const qs = new URLSearchParams()
+      if (params.targetId) qs.set('targetId', params.targetId)
+      if (params.actor) qs.set('actor', params.actor)
+      if (params.action) qs.set('action', params.action)
+      if (params.domain) qs.set('domain', params.domain)
+      if (params.limit) qs.set('limit', params.limit)
+      if (params.before) qs.set('before', params.before)
+      const s = qs.toString()
+      return call('GET', `/audit${s ? '?' + s : ''}`)
+    },
+  }
 }

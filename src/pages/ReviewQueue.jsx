@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom'
-import { Check, X, Sparkles, GitPullRequestArrow, FileEdit, ShieldAlert, MessageSquare, Mic, Quote, AlertTriangle } from 'lucide-react'
-import { canEdit, contributeBlock } from '../lib/permissions'
+import { Check, X, Sparkles, GitPullRequestArrow, FileEdit, ShieldCheck, Lock, MessageSquare, Mic, Quote, AlertTriangle } from 'lucide-react'
+import { canEdit, contributeBlock, reviewBlock, isReviewer, isIntern } from '../lib/permissions'
 import { readiness } from '../lib/readiness'
 import { similarExpertise } from '../lib/capture'
-import { useStore } from '../store'
+import { useStore, queueFor } from '../store'
 import { domainGradient } from '../data/taxonomy'
 import { Breadcrumb } from './ExpertiseLayout'
 import { StatusBadge, timeAgo } from '../components/ui'
@@ -31,12 +31,19 @@ const FIELD_LABELS = {
   escalation: 'Escalation rules',
 }
 
-function RoleNotice() {
-  const role = useStore((s) => s.user.role)
-  if (role === 'reviewer') return null
+// Tells each account which slice of the queue it is looking at and what it may decide.
+function ScopeNotice() {
+  const user = useStore((s) => s.user)
+  if (isReviewer(user))
+    return (
+      <div className="mt-4 flex items-center gap-2 rounded-xl bg-indigo-500/10 px-4 py-2.5 text-sm text-indigo-600 ring-1 ring-indigo-500/25 dark:text-indigo-300">
+        <ShieldCheck size={16} /> You’re the Reviewer: every domain’s queue is shown and you can decide any item.
+      </div>
+    )
   return (
-    <div className="mt-4 flex items-center gap-2 rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-600 ring-1 ring-amber-500/25 dark:text-amber-400">
-      <ShieldAlert size={16} /> You're signed in as a Contributor. Only Reviewers can approve changes — sign in as a Reviewer from the user menu to try it.
+    <div className="mt-4 flex items-center gap-2 rounded-xl bg-gray-500/5 px-4 py-2.5 text-sm text-gray-600 ring-1 ring-gray-500/15 dark:text-gray-300">
+      <ShieldCheck size={16} className="shrink-0" />
+      Showing the {user.domains.join(' and ')} queue{user.domains.length > 1 ? 's' : ''}. You can approve other experts’ work here, never your own; the Reviewer sees every domain.
     </div>
   )
 }
@@ -45,7 +52,7 @@ function ProposalCard({ p }) {
   const { expertise, approveProposal, rejectProposal, user } = useStore()
   const e = expertise.find((x) => x.id === p.expertiseId)
   if (!e) return null
-  const canReview = user.role === 'reviewer'
+  const block = reviewBlock(user, e.domain, p)
   return (
     <div className="card p-4">
       <div className="flex items-start gap-3">
@@ -69,10 +76,11 @@ function ProposalCard({ p }) {
           {p.capture && <Provenance sources={p.sources} capture={p.capture} />}
           {p.chatId && <Link to={`/c/${p.chatId}`} className="mt-2 inline-block text-xs text-accent-500 hover:underline">View source conversation →</Link>}
           {p.meetingTitle && <p className="mt-2 flex items-center gap-1.5 text-xs text-gray-500"><Mic size={12} /> From meeting: {p.meetingTitle} · <Link to="/meetings" className="text-accent-500 hover:underline">Meeting Recorder →</Link></p>}
+          {block && <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-500"><Lock size={12} /> {block}</p>}
         </div>
         <div className="flex shrink-0 gap-1.5">
-          <button className="btn-outline" disabled={!canReview} onClick={() => rejectProposal(p.id)}><X size={15} /> Reject</button>
-          <button className="btn-accent" disabled={!canReview} onClick={() => approveProposal(p.id)}><Check size={15} /> Approve & merge</button>
+          <button className="btn-outline" disabled={!!block} title={block || ''} onClick={() => rejectProposal(p.id)}><X size={15} /> Reject</button>
+          <button className="btn-accent" disabled={!!block} title={block || ''} onClick={() => approveProposal(p.id)}><Check size={15} /> Approve & merge</button>
         </div>
       </div>
     </div>
@@ -81,7 +89,7 @@ function ProposalCard({ p }) {
 
 function DraftCard({ e }) {
   const { approveExpertise, rejectExpertise, submitForReview, user, expertise } = useStore()
-  const canReview = user.role === 'reviewer'
+  const decideBlock = reviewBlock(user, e.domain, e)
   const mayEdit = canEdit(user, e)
   const block = contributeBlock(user, e.domain)
   const { missing } = readiness(e)
@@ -110,13 +118,15 @@ function DraftCard({ e }) {
           </div>
           {e.origin === 'auto-detected' && <Provenance sources={e.sources} capture={e.capture} />}
           {overlap && (
-            <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-500">
-              <AlertTriangle size={12} /> Possible overlap with <Link to={`/expertise/${overlap.id}`} className="underline">{overlap.name}</Link> — consider a revision instead.
+            <p className="mt-2 text-xs text-amber-500">
+              <AlertTriangle size={12} className="mr-1.5 inline -translate-y-px" />
+              Possible overlap with <Link to={`/expertise/${overlap.id}`} className="underline">{overlap.name}</Link>. Consider a revision instead.
             </p>
           )}
           {e.status === 'draft' && missing.length > 0 && (
             <p className="mt-1 text-xs text-gray-500">Still needs: {missing.map((m) => m.label.toLowerCase()).join('; ')}</p>
           )}
+          {e.status === 'in_review' && decideBlock && <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-500"><Lock size={12} /> {decideBlock}</p>}
         </div>
         <div className="flex shrink-0 gap-1.5">
           {mayEdit && <Link to={`/expertise/${e.id}?edit=1`} className="btn-outline">Edit</Link>}
@@ -124,8 +134,8 @@ function DraftCard({ e }) {
             <button className="btn-primary" disabled={!mayEdit || missing.length > 0} title={block || (missing.length ? 'Complete the checklist on the draft first' : '')} onClick={() => submitForReview(e.id)}>Submit for review</button>
           ) : (
             <>
-              <button className="btn-outline" disabled={!canReview} onClick={() => rejectExpertise(e.id)}><X size={15} /></button>
-              <button className="btn-accent" disabled={!canReview} onClick={() => approveExpertise(e.id, 'Initial approval')}><Check size={15} /> Approve</button>
+              <button className="btn-outline" disabled={!!decideBlock} title={decideBlock || 'Send back to draft'} onClick={() => rejectExpertise(e.id)}><X size={15} /></button>
+              <button className="btn-accent" disabled={!!decideBlock} title={decideBlock || ''} onClick={() => approveExpertise(e.id, 'Initial approval')}><Check size={15} /> Approve</button>
             </>
           )}
         </div>
@@ -135,9 +145,17 @@ function DraftCard({ e }) {
 }
 
 export default function ReviewQueue() {
-  const { expertise, proposals } = useStore()
-  const inReview = expertise.filter((e) => e.status === 'in_review')
-  const drafts = expertise.filter((e) => e.status === 'draft')
+  const state = useStore()
+  if (isIntern(state.user))
+    return (
+      <div className="mx-auto max-w-xl px-8 pt-24 text-center">
+        <Lock size={22} className="mx-auto text-gray-400" />
+        <h1 className="mt-3 text-xl font-semibold">The Review Queue is for experts and reviewers</h1>
+        <p className="mt-2 text-sm text-gray-500">As an intern you can read every approved Expertise and Fractal applies it to your answers automatically. Contributing and reviewing need a domain expert account.</p>
+        <Link to="/expertise" className="btn-outline mt-5">Browse Expertise</Link>
+      </div>
+    )
+  const { inReview, drafts, proposals } = queueFor(state)
 
   const Group = ({ title, desc, children, n }) => (
     <section className="mt-8">
@@ -156,7 +174,7 @@ export default function ReviewQueue() {
           <p className="mt-1 max-w-2xl text-sm text-gray-500">
             Nothing reaches operational use without a human. New Expertise and every change to an existing one — from experts, corrections or 👎 feedback — waits here for a Reviewer.
           </p>
-          <RoleNotice />
+          <ScopeNotice />
           <Group title="Awaiting approval" desc="Submitted Expertise ready for a reviewer's decision." n={inReview.length}>
             {inReview.map((e) => <DraftCard key={e.id} e={e} />)}
           </Group>

@@ -3,13 +3,17 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Pencil, Save, Send, Check, Archive, Download, MessageSquarePlus, RotateCcw, GitCompare, FileText, MessagesSquare, Mic,
   Link2, ThumbsUp, ThumbsDown, Trash2, ChevronDown, ChevronLeft, ChevronRight, Copy, ShieldCheck, Info, AlertTriangle, Mail,
+  ClipboardList, Plus, X, RotateCw, GitPullRequestArrow, Eye,
 } from 'lucide-react'
 import { useStore } from '../store'
+import { USE_MOCK, apiFor } from '../lib/api'
+import { isIntern } from '../lib/permissions'
 import { CONTENT_FIELDS } from '../data/expertise'
 import { TAXONOMY, ASSET_TYPES, domainMeta, slugify, flatOrder } from '../data/taxonomy'
-import { StatusBadge, fmtDate, timeAgo, Dropdown } from '../components/ui'
+import { StatusBadge, fmtDate, timeAgo, Dropdown, Modal } from '../components/ui'
 import { Breadcrumb } from './ExpertiseLayout'
-import { canEdit, contributeBlock } from '../lib/permissions'
+import { canEdit, contributeBlock, canGovern, reviewBlock, deleteBlock } from '../lib/permissions'
+import { helpfulStats, fmtRate } from '../lib/ratings'
 import { readiness } from '../lib/readiness'
 
 const LIST_SECTIONS = [
@@ -183,7 +187,7 @@ function Versions({ e }) {
               {!current && v.snapshot && (
                 <span className="flex gap-1">
                   <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(open === i ? null : i)}><GitCompare size={13} /> Compare</button>
-                  <button className="btn-ghost px-2 py-1 text-xs" disabled={user.role !== 'reviewer'} onClick={() => rollbackExpertise(e.id, v.version)} title={user.role !== 'reviewer' ? 'Reviewer only' : ''}>
+                  <button className="btn-ghost px-2 py-1 text-xs" disabled={!canGovern(user)} onClick={() => rollbackExpertise(e.id, v.version)} title={!canGovern(user) ? 'Only the Reviewer can roll back' : ''}>
                     <RotateCcw size={13} /> Roll back
                   </button>
                 </span>
@@ -199,6 +203,68 @@ function Versions({ e }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+const ACTIVITY_ICON = {
+  'expertise.create': Plus,
+  'expertise.update': Pencil,
+  'expertise.submit': Send,
+  'expertise.approve': Check,
+  'expertise.reject': X,
+  'expertise.deprecate': Archive,
+  'expertise.restore': RotateCw,
+  'expertise.rollback': RotateCcw,
+  'expertise.delete': Trash2,
+  'proposal.create': GitPullRequestArrow,
+  'proposal.approve': Check,
+  'proposal.reject': X,
+  'chat.view_source': Eye,
+}
+
+function Activity({ e }) {
+  const user = useStore((s) => s.user)
+  const [entries, setEntries] = useState(null) // null = loading, [] = loaded empty
+
+  useEffect(() => {
+    if (USE_MOCK || isIntern(user) || !user) { setEntries([]); return }
+    let cancelled = false
+    apiFor(user).listAudit({ targetId: e.id, limit: 10 }).then((page) => {
+      if (!cancelled) setEntries(page.entries || [])
+    }).catch(() => { if (!cancelled) setEntries([]) })
+    return () => { cancelled = true }
+  }, [e.id, user?.id]) // eslint-disable-line
+
+  if (USE_MOCK) {
+    return (
+      <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-500 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-400 dark:ring-gray-800">
+        Activity requires the backend.
+      </div>
+    )
+  }
+
+  if (!entries) return <p className="mt-4 text-sm text-gray-500">Loading activity…</p>
+  if (!entries.length) return <p className="mt-3 text-sm text-gray-500">No activity recorded yet.</p>
+
+  return (
+    <div className="mt-4 border-l border-gray-200 pl-5 dark:border-gray-800">
+      {entries.map((a) => {
+        const Icon = ACTIVITY_ICON[a.action] || ClipboardList
+        return (
+          <div key={a.id} className="relative pb-3">
+            <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-gray-300 ring-4 ring-white dark:bg-gray-600 dark:ring-gray-900" />
+            <div className="flex items-start gap-2">
+              <Icon size={13} className="mt-0.5 shrink-0 text-gray-400" />
+              <div>
+                <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400">{a.summary}</p>
+                <p className="text-xs text-gray-500" title={new Date(a.at).toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'short' })}>{timeAgo(a.at)}</p>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+      <Link to="/expertise/audit" className="mt-1 inline-block text-xs text-accent-500 hover:underline">View full audit log →</Link>
     </div>
   )
 }
@@ -305,12 +371,17 @@ export default function ExpertiseDetail() {
   const { id } = useParams()
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
-  const { expertise, user, updateExpertise, submitForReview, approveExpertise, deprecateExpertise, deleteExpertise, proposeRevision, showToast } = useStore()
+  const { expertise, user, updateExpertise, submitForReview, approveExpertise, deprecateExpertise, restoreExpertise, deleteExpertise, proposeRevision, showToast } = useStore()
   const e = expertise.find((x) => x.id === id)
   const edit = params.get('edit') === '1'
   const [draft, setDraft] = useState(null)
+  // Keywords are edited as free text and split into a list as you type, so commas and spaces stay put.
+  const [keywordsText, setKeywordsText] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
-  useEffect(() => { if (e && edit) setDraft(structuredClone(e)) }, [edit, id]) // eslint-disable-line
+  useEffect(() => {
+    if (e && edit) { setDraft(structuredClone(e)); setKeywordsText(e.keywords.join(', ')) }
+  }, [edit, id]) // eslint-disable-line
   useEffect(() => { document.getElementById('expertise-scroll')?.scrollTo({ top: 0 }) }, [id])
 
   const order = useMemo(() => flatOrder(expertise), [expertise])
@@ -322,13 +393,16 @@ export default function ExpertiseDetail() {
       { id: 'sources', label: 'Sources' },
       { id: 'feedback', label: 'Feedback' },
       { id: 'history', label: 'Version history' },
+      { id: 'activity', label: 'Activity' },
     ],
     [],
   )
 
   if (!e) return <p className="p-16 text-center text-gray-500">Expertise not found. <Link className="text-accent-500" to="/expertise">Back to overview</Link></p>
 
-  const isReviewer = user.role === 'reviewer'
+  const governs = canGovern(user)
+  const decideBlock = reviewBlock(user, e.domain, e)
+  const delBlock = deleteBlock(user, e)
   // Content can only be changed by contributors who are experts in this Expertise's domain.
   const mayEdit = canEdit(user, e)
   const editBlock = contributeBlock(user, e.domain)
@@ -360,8 +434,9 @@ export default function ExpertiseDetail() {
     setParams({})
   }
 
-  const up = e.feedback.filter((f) => f.rating === 'up').length
-  const helpful = e.successRate != null ? `${Math.round(e.successRate * 100)}%` : e.feedback.length ? `${Math.round((up / e.feedback.length) * 100)}%` : '—'
+  // Computed from the stored ratings, so it moves as people rate answers.
+  const rated = helpfulStats(e)
+  const helpful = rated.total ? `${fmtRate(rated.rate)} helpful (${rated.total} rating${rated.total > 1 ? 's' : ''})` : 'no ratings yet'
 
   return (
     <div className="mx-auto flex max-w-6xl gap-10 px-8">
@@ -409,16 +484,27 @@ export default function ExpertiseDetail() {
                   </button>
                 )}
                 {e.status === 'in_review' && (
-                  <button className="btn-accent" disabled={!isReviewer} onClick={() => approveExpertise(e.id, 'Initial approval')} title={!isReviewer ? 'Reviewer only' : ''}><Check size={14} /> Approve</button>
+                  <button className="btn-accent" disabled={!!decideBlock} onClick={() => approveExpertise(e.id, 'Initial approval')} title={decideBlock || ''}><Check size={14} /> Approve</button>
                 )}
                 {e.status === 'approved' && (
                   <button className="btn-primary" onClick={() => navigate('/', { state: { attach: e.id } })}><MessageSquarePlus size={14} /> Use in chat</button>
                 )}
                 <Dropdown align="right" trigger={() => <button className="btn-ghost px-2">•••</button>}>
-                  {e.status === 'approved' && <button className="menu-item" disabled={!isReviewer} onClick={() => deprecateExpertise(e.id)}><Archive size={15} /> Deprecate</button>}
-                  {e.status === 'deprecated' && <button className="menu-item" disabled={!isReviewer} onClick={() => updateExpertise(e.id, { status: 'approved' })}><RotateCcw size={15} /> Restore</button>}
-                  <button className="menu-item text-red-500" onClick={() => { deleteExpertise(e.id); navigate('/expertise') }}><Trash2 size={15} /> Delete</button>
+                  {e.status === 'approved' && <button className="menu-item disabled:opacity-40" disabled={!governs} title={governs ? '' : 'Only the Reviewer can deprecate'} onClick={() => deprecateExpertise(e.id)}><Archive size={15} /> Deprecate</button>}
+                  {e.status === 'deprecated' && <button className="menu-item disabled:opacity-40" disabled={!governs} title={governs ? '' : 'Only the Reviewer can restore'} onClick={() => restoreExpertise(e.id)}><RotateCcw size={15} /> Restore</button>}
+                  <button className="menu-item text-red-500 disabled:opacity-40" disabled={!!delBlock} title={delBlock || ''} onClick={() => setConfirmDelete(true)}><Trash2 size={15} /> Delete</button>
                 </Dropdown>
+                <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete this Expertise?">
+                  <div className="px-5 pb-5 pt-2 text-sm">
+                    <p className="text-gray-600 dark:text-gray-400">
+                      “{e.name}” ({e.status.replace('_', ' ')}, v{e.version}) and its open proposals will be removed. This can’t be undone.
+                    </p>
+                    <div className="mt-4 flex justify-end gap-2">
+                      <button className="btn-ghost" onClick={() => setConfirmDelete(false)}>Cancel</button>
+                      <button className="btn bg-red-600 text-white hover:bg-red-500" onClick={() => { setConfirmDelete(false); if (deleteExpertise(e.id)) navigate('/expertise') }}><Trash2 size={14} /> Delete</button>
+                    </div>
+                  </div>
+                </Modal>
               </>
             )}
           </div>
@@ -448,7 +534,8 @@ export default function ExpertiseDetail() {
               <input className="input" value={draft.owner} onChange={(ev) => set({ owner: ev.target.value })} />
             </label>
             <label className="text-sm"><span className="label mb-1 block">Trigger keywords</span>
-              <input className="input" value={draft.keywords.join(', ')} onChange={(ev) => set({ keywords: ev.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+              <input className="input" value={keywordsText} placeholder="chiller, chw, too warm"
+                onChange={(ev) => { setKeywordsText(ev.target.value); set({ keywords: ev.target.value.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) }) }} />
             </label>
             <div className="text-sm sm:col-span-2"><span className="label mb-1.5 block">Asset types</span>
               <div className="flex flex-wrap gap-1.5">
@@ -471,7 +558,7 @@ export default function ExpertiseDetail() {
             <span><span className="text-gray-500">Owner </span>{e.owner}</span>
             <span><span className="text-gray-500">Reviewer </span>{e.reviewer || '—'}</span>
             <span className="text-gray-500">Updated {timeAgo(e.updatedAt)}</span>
-            <span className="text-gray-500">{e.usageCount} uses · {helpful} helpful</span>
+            <span className="text-gray-500">{e.usageCount} uses · {helpful}</span>
             <span className="flex gap-1">{(e.assetTypes || []).map((a) => <span key={a} className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-400">{a}</span>)}</span>
           </div>
         )}
@@ -530,6 +617,7 @@ export default function ExpertiseDetail() {
         <section><H2 id="sources" count={e.sources.length || null}>Sources</H2><Sources e={e} /></section>
         <section><H2 id="feedback" count={e.feedback.length || null}>Feedback</H2><Feedback e={e} /></section>
         <section><H2 id="history" count={e.versions.length || null}>Version history</H2><Versions e={e} /></section>
+        <section><H2 id="activity">Activity</H2><Activity e={e} /></section>
 
         {/* prev / next */}
         <div className="mt-14 grid gap-3 border-t border-gray-100 pt-6 sm:grid-cols-2 dark:border-gray-850">

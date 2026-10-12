@@ -428,7 +428,7 @@ function TakeawaysCard({ rec, readOnly }) {
             <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-400"><AlertTriangle size={13} /> Category selector unavailable ({ins.category_error}). You can still link takeaways manually.</p>
           )}
           {!readOnly && !isContributor(user) && (
-            <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-500"><Lock size={12} /> You're signed in as a Reviewer. Reviewers approve know-how but don't contribute it — sign in as a domain expert to send these links to the Review Queue.</p>
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-500"><Lock size={12} /> {contributeBlock(user)} Sign in as a domain expert to send these links to the Review Queue.</p>
           )}
           {!readOnly && <p className="mt-3 text-[11px] text-gray-500">{routed} link{routed === 1 ? '' : 's'} will be sent to the Review Queue when you approve. Only links into your own expert domains ({(user.domains || []).join(', ') || 'none'}) can be sent. Live Expertise only changes after a Reviewer merges them.</p>}
         </>
@@ -461,7 +461,7 @@ function InsightsDrawer({ rec }) {
         <header className="flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
           <div>
             <p className="flex items-center gap-2 text-base font-semibold"><Sparkles size={16} className="text-red-400" /> Key Insights</p>
-            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500"><Lock size={11} /> Read-only · model-derived audit output · {rec.title}</p>
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500"><Lock size={11} /> Read-only · model-derived audit output · {rec.title}{rec.saved?.recorded_by ? ` · recorded by ${rec.saved.recorded_by}` : ''}</p>
           </div>
           {!done && <button className="icon-btn" disabled={saving} onClick={rec.backToEdit} title="Back to edit (discards insights)"><X size={18} /></button>}
         </header>
@@ -555,7 +555,7 @@ function RecentMeetings({ rec }) {
           <button key={m.id} className="group block w-full py-2 text-left" onClick={() => rec.load(m)}>
             <span className="block truncate text-sm font-medium group-hover:text-accent-500">{m.title}</span>
             <span className="block truncate text-xs text-gray-500">
-              {new Date(m.created_at).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {fmt(m.duration || 0)} · {m.summary.slice(0, 90)}
+              {new Date(m.created_at).toLocaleString('en-SG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {fmt(m.duration || 0)}{m.recorded_by ? ` · by ${m.recorded_by}` : ''} · {m.summary.slice(0, 90)}
             </span>
           </button>
         ))}

@@ -31,17 +31,31 @@ Restart uvicorn after editing `.env`; `--reload` only watches Python files.
 | GET    | `/api/models` | Models this backend serves, with availability |
 | POST   | `/api/chat/stream` | Streams one model's answer as Server-Sent Events |
 | POST   | `/api/writing/generate` | Generate a summary or email draft from selected approved Expertise |
+| POST   | `/api/files` | Stores one chat attachment (multipart `file`) and returns its id |
 | GET    | `/api/taxonomy` | Domain → topics taxonomy (mirrors `src/data/taxonomy.js`) |
-| GET    | `/api/expertise` | List all expertise |
+| GET    | `/api/expertise` | List all expertise, with versions + feedback |
 | GET    | `/api/expertise/{id}` | Single expertise with versions + feedback |
-| POST   | `/api/expertise` | Create expertise |
-| PATCH  | `/api/expertise/{id}` | Update expertise |
-| GET    | `/api/proposals` | List proposals |
+| POST   | `/api/expertise` | Create a draft (Reviewer, or an expert in its domain) |
+| PATCH  | `/api/expertise/{id}` | Edit content / metadata (status and version are ignored) |
+| DELETE | `/api/expertise/{id}` | Delete (Reviewer, or a domain expert for a draft) |
+| POST   | `/api/expertise/usage` | `{ids}` — count one use for each Expertise applied to an answer |
+| POST   | `/api/expertise/{id}/submit` | draft → in_review (domain expert; readiness checklist must pass) |
+| POST   | `/api/expertise/{id}/approve` | `{note}` → approved, bump version (0.x → 1.0, else minor + 1), save snapshot |
+| POST   | `/api/expertise/{id}/reject` | → draft |
+| POST   | `/api/expertise/{id}/deprecate` · `/restore` | Reviewer only |
+| POST   | `/api/expertise/{id}/rollback` | `{version}` — Reviewer only; restores that snapshot as a new version |
+| GET    | `/api/proposals` | Open proposals (`?status=all` for history) |
+| POST   | `/api/proposals` | Propose a revision `{expertiseId, changes: {field: {add, remove}}, reason, …}` |
+| POST   | `/api/proposals/{id}/approve` | Merge into the Expertise as a new version; returns the Expertise |
+| POST   | `/api/proposals/{id}/reject` | Close without merging |
 | GET    | `/api/chats` | List chats for the current user (with messages + responses) |
 | POST   | `/api/chats` | Create a chat |
 | GET    | `/api/chats/{id}` | Get a single chat |
+| PUT    | `/api/chats/{id}` | Create or update a chat (title / folder / pinned) under a client id |
+| PUT    | `/api/chats/{id}/messages/{msgId}` | Create or replace a message and its responses |
 | PATCH  | `/api/chats/{id}` | Update chat title / folder / pinned |
 | DELETE | `/api/chats/{id}` | Delete a chat |
+| POST   | `/api/responses/{id}/rating` | `{rating, comment}` — saves the rating + Feedback; a 👎 with a comment from a domain expert opens a proposal |
 | POST   | `/api/expertise/extract` | Know-how capture: did the user share reusable know-how in this exchange? (contributors only) |
 
 ### `POST /api/chat/stream`
@@ -51,13 +65,28 @@ Body:
 ```json
 {
   "model": "claude-sonnet",
-  "messages": [{"role": "user", "content": "CHWST is 8.1 °C, what do I check?"}],
+  "messages": [{"role": "user", "content": "CHWST is 8.1 °C, what do I check?", "files": ["<id from /api/files>"]}],
   "expertise": [{"id": "exp-chiller-fault", "name": "...", "version": "1.3", "status": "approved", "...": "..."}]
 }
 ```
 
 Events, in order: `meta {expertise: [{id, version}]}` (the Expertise actually applied), then
 `delta {text}` repeatedly, then `done {stopReason, model}` or `error {message}`.
+
+### Attachments (`POST /api/files`)
+
+The composer uploads each file as soon as it is picked; messages keep only the returned
+`{id, name, size, kind}`. Accepted: PDF, DOCX, TXT, MD, CSV, PNG, JPG; up to 10 MB each and
+5 per message. Files are stored under `backend/uploads/<id>/` (git-ignored) with their
+extracted text, and re-read on every chat turn, so follow-up questions still see them.
+
+- **Claude** gets PDFs and images natively (it reads scanned pages and figures), and
+  DOCX/text files as text documents (first 100,000 characters). The conversation prefix is
+  prompt-cached, so files resent on later turns bill at cache-read rates.
+- **Other models** get the extracted text (first 20,000 characters per file) as
+  `<attached_file name="...">` blocks; images are noted but not shown to them yet.
+- Truncation is stated in the text the model receives. Unknown or deleted file ids become a
+  "no longer available" note instead of an error.
 
 ## Know-how capture (`POST /api/expertise/extract`)
 
@@ -83,8 +112,18 @@ exists it must come from the verified profile instead.
 
 ## Auth (stub)
 
-All chats/expertise endpoints read the `X-User-Id` header (a Supabase user UUID) and look up
-the matching `profiles` row. Prompt 8 replaces this with full Supabase JWT verification.
+Endpoints that write read the `X-User-Id` header (a Supabase user UUID) or, from the front end's
+demo sign-in, `X-User-Email`, and look up the matching `profiles` row. Writes check the same role
+rules as `src/lib/permissions.js` (403 otherwise) and leave an `audit_log` row. Prompt 8 replaces
+the header with full Supabase JWT verification.
+
+## How the UI uses it (Library, Review Queue, Chats)
+
+After sign-in the front end loads `/api/chats`, `/api/expertise` and `/api/proposals` and from then
+on saves through the endpoints above: each change shows at once, writes run one at a time in order,
+and the server's copy replaces the local one. If a write fails, the UI shows a toast and reloads
+from Supabase. With `VITE_USE_MOCK=true` or the backend offline, the UI keeps its data in the
+browser as before (a toast says so). "Reset demo data" reloads from Supabase instead of wiping it.
 
 ## How answers are built
 
@@ -103,19 +142,24 @@ the matching `profiles` row. Prompt 8 replaces this with full Supabase JWT verif
 # From the repo root — generate seed_data.json from the front-end mock data
 node scripts/export-seed.mjs
 
+# Apply migrations first (adds the columns the UI needs, e.g. profiles.email)
+npx supabase db push
+
 # From backend/ — load it into Supabase + create demo users
 python seed.py
 ```
 
-Demo users:
-- `adrian@fractal.demo` (reviewer) — password `demo1234`
-- `priya@fractal.demo` (contributor) — password `demo1234`
+`seed.py` creates every account in `src/data/users.js` (Adrian, Hafiz, Priya, Nurul, Daniel,
+Jasmine, Marcus, and the intern account) with its email, role and domains; password `demo1234`.
 
 ## Current limitations
 
 - Expertise matching is still the front end's keyword match. Prompt 3 replaces it.
-- Attached files are not sent to Claude yet; web search is not implemented.
+- Attachments live on the backend's local disk (`backend/uploads/`), not Supabase Storage, and
+  are never deleted. Non-Claude models can't see images yet. Web search is not implemented.
 - GPT, Gemini, Grok, Hunyuan and DeepSeek are still mocked.
+- Reviewers opening another person's chat from a Review Queue source link get redirected home:
+  `/api/chats` only returns the signed-in account's own chats.
 
 ## Writing Assistant
 
