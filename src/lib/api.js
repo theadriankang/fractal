@@ -260,7 +260,16 @@ export class ApiError extends Error {
   }
 }
 
-async function request(user, method, path, body) {
+// Dynamic import (not a static one) so this file and store.js, which imports this file,
+// don't form a circular import. Refreshes the active account's Supabase session once and
+// returns the refreshed user, or null if there's nothing to refresh / the refresh failed.
+async function _refreshedUser() {
+  const { useStore } = await import('../store')
+  const ok = await useStore.getState().refreshSessionIfStale()
+  return ok ? useStore.getState().user : null
+}
+
+async function request(user, method, path, body, _retried = false) {
   let res
   // Prefers a real, verified Supabase session (backend/app/auth.py checks the signature);
   // falls back to the old unverified X-User-Email header when there's no session yet
@@ -276,6 +285,13 @@ async function request(user, method, path, body) {
     })
   } catch {
     throw new ApiError('Backend offline.', 0)
+  }
+  // A bearer token that expired mid-session (App.jsx refreshes proactively, but a sleeping
+  // laptop can still miss the window) -- refresh it once and retry transparently instead of
+  // surfacing a 401 the person has no obvious way to act on.
+  if (res.status === 401 && !_retried && user?.accessToken) {
+    const fresh = await _refreshedUser()
+    if (fresh?.accessToken && fresh.accessToken !== user.accessToken) return request(fresh, method, path, body, true)
   }
   if (res.status === 204) return null
   const data = await res.json().catch(() => null)
@@ -370,16 +386,24 @@ export function insightsApi(user) {
 
   return {
     /** POST /api/insights/reports/generate — multipart upload; returns the full report. */
-    generateReport: async (file, { title = '', domains = [] } = {}) => {
+    generateReport: async (file, { title = '', domains = [] } = {}, _retried = false) => {
       const body = new FormData()
       body.append('file', file)
       if (title) body.append('title', title)
       if (domains.length) body.append('domains', domains.join(','))
       let res
       try {
-        res = await apiFetch('/api/insights/reports/generate', { method: 'POST', headers, body })
+        res = await apiFetch('/api/insights/reports/generate', { method: 'POST', headers: _authHeaders(user), body })
       } catch {
         throw new ApiError('Backend offline.', 0)
+      }
+      // Same expired-token retry as request() -- this call builds its own multipart body so
+      // it can't share that helper directly, but needs the same one-shot refresh-and-retry.
+      if (res.status === 401 && !_retried && user?.accessToken) {
+        const fresh = await _refreshedUser()
+        if (fresh?.accessToken && fresh.accessToken !== user.accessToken) {
+          return insightsApi(fresh).generateReport(file, { title, domains }, true)
+        }
       }
       return parseOrThrow(res)
     },

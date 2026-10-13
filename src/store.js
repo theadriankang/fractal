@@ -279,6 +279,32 @@ export const useStore = create(
         set((s) => ({ user: withToken(u, tokens), session: { ...s.session, activeId: id, tokens } }))
         get().showToast(`Switched to ${u.name}`)
       },
+      // Supabase access tokens expire (~1h) and this app deliberately runs the client with
+      // autoRefreshToken off (src/lib/supabase.js — it juggles several accounts' sessions
+      // itself, so supabase-js can't own the one "current" session). Nothing was refreshing
+      // the stored token in between, so a tab left open past the token's lifetime started
+      // sending a dead bearer token on every request and the backend correctly 401'd it
+      // ("Invalid or expired session token."). This refreshes the *active* account's token
+      // using its stored refresh token — called proactively on an interval/visibility change
+      // (see App.jsx) and reactively by src/lib/api.js on a 401 — and drops the token (falling
+      // back to the unverified X-User-Email header, same as switchAccount above) if the
+      // refresh token itself is dead, rather than retrying a request that can never succeed.
+      refreshSessionIfStale: async () => {
+        const { session } = get()
+        const id = session.activeId
+        const saved = id && session.tokens[id]
+        if (!hasSupabase || !saved?.refreshToken) return false
+        const { data, error } = await supabase.auth.refreshSession({ refresh_token: saved.refreshToken })
+        const tokens = { ...get().session.tokens }
+        if (error || !data.session) {
+          delete tokens[id]
+          set((s) => ({ session: { ...s.session, tokens }, user: s.session.activeId === id ? withToken(s.user, tokens) : s.user }))
+          return false
+        }
+        tokens[id] = { accessToken: data.session.access_token, refreshToken: data.session.refresh_token }
+        set((s) => ({ session: { ...s.session, tokens }, user: s.session.activeId === id ? withToken(s.user, tokens) : s.user }))
+        return true
+      },
       // Signs out the active account; falls back to another signed-in account, else the sign-in page.
       logout: () => {
         const { session } = get()
