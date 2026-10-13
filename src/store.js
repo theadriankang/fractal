@@ -174,7 +174,8 @@ function streamResponse(get, chatId, msgId, idx, { prompt, matched, onFinish }) 
     { model: modelId, messages: historyBefore(chat, msgId, modelId), expertise: matched, routing },
     {
       // The backend reports the Expertise it actually applied (approved only).
-      onMeta: ({ expertise }) => patch((x) => ({ ...x, expertise })),
+      // Each ref now carries its domain; domainsCoordinated lists the domains this answer drew on.
+      onMeta: ({ expertise, domainsCoordinated }) => patch((x) => ({ ...x, expertise, domainsCoordinated })),
       onDelta: (t) => {
         text += t
         timer ??= setTimeout(flush, 50)

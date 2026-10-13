@@ -213,7 +213,7 @@ const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, 
 
 /**
  * Streams one model's answer from POST /api/chat/stream (Server-Sent Events).
- * handlers: onMeta({expertise}), onDelta(text), onDone({stopReason, model}), onError(message).
+ * handlers: onMeta({expertise, domainsCoordinated}), onDelta(text), onDone({stopReason, model}), onError(message).
  * Returns an abort function; aborting fires no handler.
  */
 export function streamChat({ model, messages, expertise = [], routing }, { onMeta, onDelta, onDone, onError }) {

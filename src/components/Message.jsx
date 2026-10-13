@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ChartBlock from './ChartBlock'
 import {
-  Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, BookOpenCheck, FileText, Globe, X, Scale,
+  Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, BookOpenCheck, FileText, Globe, X, Scale, Layers,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { ModelBadge } from './ModelSelector'
@@ -12,6 +12,7 @@ import CaptureCard from './CaptureCard'
 import WeighPanel from './WeighPanel'
 import { isWeigh } from '../lib/weigh'
 import { contributeBlock } from '../lib/permissions'
+import { TAXONOMY } from '../data/taxonomy'
 
 export function UserMessage({ msg }) {
   const expertise = useStore((s) => s.expertise)
@@ -37,28 +38,48 @@ export function UserMessage({ msg }) {
   )
 }
 
-function ExpertiseUsed({ refs }) {
+// "Expertise applied" chips under an answer. Each chip carries its domain; when the answer drew on
+// more than one domain, a "Drew on: …" line says so, in the same style as Data Insights reports.
+function ExpertiseUsed({ refs, domainsCoordinated }) {
   const expertise = useStore((s) => s.expertise)
   if (!refs?.length) return null
+  const shown = refs
+    .map((r) => ({ r, e: expertise.find((x) => x.id === r.id) }))
+    .filter(({ e }) => e)
+    .map(({ r, e }) => ({ r, e, domain: r.domain || e.domain }))
+  // The backend's list when present (live answers); otherwise derived from the chips (saved/mock answers).
+  const domains = domainsCoordinated?.length ? domainsCoordinated : [...new Set(shown.map((x) => x.domain).filter(Boolean))].sort()
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-gray-500">Expertise applied</span>
-      {refs.map((r) => {
-        const e = expertise.find((x) => x.id === r.id)
-        if (!e) return null
-        return (
-          <Link
-            key={r.id}
-            to={`/expertise/${r.id}`}
-            className="group flex items-center gap-1.5 rounded-lg bg-accent-500/10 px-2 py-1 text-xs text-accent-600 ring-1 ring-accent-500/25 transition hover:bg-accent-500/20 dark:text-accent-400"
-            title={`${e.summary}\n\nOwner: ${e.owner}`}
-          >
-            <BookOpenCheck size={13} />
-            {e.name}
-            <span className="rounded bg-accent-500/15 px-1 font-mono text-[10px]">v{r.version}</span>
-          </Link>
-        )
-      })}
+    <div className="mt-3">
+      {domains.length > 1 && (
+        <p className="mb-1.5 flex items-center gap-1 text-[11px] text-gray-500" title="This answer combined approved Expertise from more than one domain">
+          <Layers size={11} /> Drew on: {domains.join(', ')}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-gray-500">Expertise applied</span>
+        {shown.map(({ r, e, domain }) => {
+          const meta = TAXONOMY.find((d) => d.domain === domain)
+          return (
+            <Link
+              key={r.id}
+              to={`/expertise/${r.id}`}
+              className="group flex items-center gap-1.5 rounded-lg bg-accent-500/10 px-2 py-1 text-xs text-accent-600 ring-1 ring-accent-500/25 transition hover:bg-accent-500/20 dark:text-accent-400"
+              title={`${e.summary}\n\nDomain: ${domain}\nOwner: ${e.owner}`}
+            >
+              <BookOpenCheck size={13} />
+              {e.name}
+              <span className="rounded bg-accent-500/15 px-1 font-mono text-[10px]">v{r.version}</span>
+              {domain && (
+                <span className="flex items-center gap-1 whitespace-nowrap border-l border-accent-500/25 pl-1.5 text-[10px] text-gray-600 dark:text-gray-400">
+                  <span className={`h-1.5 w-1.5 rounded-full ${meta?.dot || 'bg-gray-400'}`} />
+                  {domain}
+                </span>
+              )}
+            </Link>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -140,7 +161,7 @@ function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
 
       {!r.streaming && (
         <>
-          {!weigh && <ExpertiseUsed refs={r.expertise} />}
+          {!weigh && <ExpertiseUsed refs={r.expertise} domainsCoordinated={r.domainsCoordinated} />}
           <div className="mt-2 flex items-center gap-0.5 text-gray-500">
             <button className="icon-btn" onClick={copy} title="Copy">{copied ? <Check size={15} /> : <Copy size={15} />}</button>
             {!readOnly && <button className="icon-btn" onClick={() => regenerate(chatId, msg.id, idx)} title="Regenerate"><RefreshCw size={15} /></button>}
