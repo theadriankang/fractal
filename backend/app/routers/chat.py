@@ -115,10 +115,12 @@ async def chat_stream(req: ChatStreamRequest, db: Session = Depends(get_db)):
     # Load from the database by id — never trust browser-sent content.
     exp_ids = [e.id for e in req.expertise if e.id]
     applied: list[ExpertiseIn] = []
+    domain_of: dict[str, str] = {}
     if exp_ids:
         rows = db.query(Expertise).filter(
             Expertise.id.in_(exp_ids), Expertise.status == "approved"
         ).all()
+        domain_of = {e.id: e.domain for e in rows}
         applied = [
             ExpertiseIn(
                 id=e.id, name=e.name, version=e.version, status=e.status,
@@ -140,7 +142,13 @@ async def chat_stream(req: ChatStreamRequest, db: Session = Depends(get_db)):
         yield sse("meta", {
             "modelId": resolved_id,
             "auto": is_auto,
-            "expertise": [{"id": e.id, "version": e.version} for e in applied],
+            "expertise": [
+                {"id": e.id, "version": e.version, "name": e.name, "domain": domain_of.get(e.id, "")}
+                for e in applied
+            ],
+            # Same signal Data Insights shows as "Drew on: ..." (routers/insights.py): which domains'
+            # Expertise grounded this answer, so cross-domain reasoning is visible in chat too.
+            "domainsCoordinated": sorted(set(domain_of.values())),
         })
         try:
             async for kind, data in registry.stream_reply(entry, system, messages):

@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     extraction_threshold: float = 0.6  # below this confidence, nothing is proposed
     extraction_min_words: int = 12  # skip short messages (questions, small talk)
 
+    # Cross-domain weighing (POST /api/expertise/weigh): weighs several domains' Expertise at once,
+    # so it uses a stronger reasoning model than the extractor. Unset key = quick text-matching mode.
+    weigh_model: str = "claude-sonnet-5-5"
+    # Automatic weighing in chat: also check questions that don't explicitly ask for a trade-off, and
+    # show the weighing only if the experts conflict. Costs one model call per question that has 2+
+    # experts. False = weigh only when the question itself asks about two areas or a trade-off.
+    weigh_auto_check: bool = True
+
     # Expertise retrieval (embeddings)
     embedding_provider: str = "local"  # "local" (fastembed) or "litellm"
     embedding_model: str = ""  # for litellm, e.g. "text-embedding-3-small"

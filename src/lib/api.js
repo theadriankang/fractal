@@ -163,6 +163,29 @@ export async function matchExpertiseBackend(query, attachedIds = [], limit = 3) 
 }
 
 /**
+ * POST /api/expertise/weigh — weigh every relevant domain's approved Expertise against one
+ * question: each expert's view, where they agree, where one domain's idea runs into another's
+ * rule, and suggestions that still show what each expert thinks. Throws with a readable message.
+ * `context` is the earlier chat as [{role, content}] so follow-up questions keep their meaning.
+ */
+export async function weighExpertise({ question, attachedIds = [], context = [], auto = false }) {
+  if (USE_MOCK) throw new Error('Weighing across domains needs the Fractal backend (mock mode is on).')
+  let res
+  try {
+    res = await apiFetch('/api/expertise/weigh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, attachedIds, context, auto }),
+    })
+  } catch {
+    throw new Error('The Fractal backend is offline, so the domains could not be weighed. Try again in a moment.')
+  }
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `Weighing failed (${res.status}).`)
+  return data
+}
+
+/**
  * POST /api/route — Smart Auto routing. An LLM call classifies the prompt
  * (coding / analytical / long-document / operational / writing / ...) and
  * returns the model best suited to it, falling back to keyword rules
@@ -190,7 +213,7 @@ const pickExpertise = (e) => Object.fromEntries(EXPERTISE_FIELDS.map((f) => [f, 
 
 /**
  * Streams one model's answer from POST /api/chat/stream (Server-Sent Events).
- * handlers: onMeta({expertise}), onDelta(text), onDone({stopReason, model}), onError(message).
+ * handlers: onMeta({expertise, domainsCoordinated}), onDelta(text), onDone({stopReason, model}), onError(message).
  * Returns an abort function; aborting fires no handler.
  */
 export function streamChat({ model, messages, expertise = [], routing }, { onMeta, onDelta, onDone, onError }) {

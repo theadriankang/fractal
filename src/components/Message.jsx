@@ -4,12 +4,14 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ChartBlock from './ChartBlock'
 import {
-  Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, BookOpenCheck, FileText, Globe, X,
+  Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, BookOpenCheck, FileText, Globe, X, Scale, Layers,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { ModelBadge } from './ModelSelector'
 import CaptureCard from './CaptureCard'
+import WeighPanel from './WeighPanel'
 import { contributeBlock } from '../lib/permissions'
+import { TAXONOMY } from '../data/taxonomy'
 
 export function UserMessage({ msg }) {
   const expertise = useStore((s) => s.expertise)
@@ -35,28 +37,48 @@ export function UserMessage({ msg }) {
   )
 }
 
-function ExpertiseUsed({ refs }) {
+// "Expertise applied" chips under an answer. Each chip carries its domain; when the answer drew on
+// more than one domain, a "Drew on: …" line says so, in the same style as Data Insights reports.
+function ExpertiseUsed({ refs, domainsCoordinated }) {
   const expertise = useStore((s) => s.expertise)
   if (!refs?.length) return null
+  const shown = refs
+    .map((r) => ({ r, e: expertise.find((x) => x.id === r.id) }))
+    .filter(({ e }) => e)
+    .map(({ r, e }) => ({ r, e, domain: r.domain || e.domain }))
+  // The backend's list when present (live answers); otherwise derived from the chips (saved/mock answers).
+  const domains = domainsCoordinated?.length ? domainsCoordinated : [...new Set(shown.map((x) => x.domain).filter(Boolean))].sort()
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-gray-500">Expertise applied</span>
-      {refs.map((r) => {
-        const e = expertise.find((x) => x.id === r.id)
-        if (!e) return null
-        return (
-          <Link
-            key={r.id}
-            to={`/expertise/${r.id}`}
-            className="group flex items-center gap-1.5 rounded-lg bg-accent-500/10 px-2 py-1 text-xs text-accent-600 ring-1 ring-accent-500/25 transition hover:bg-accent-500/20 dark:text-accent-400"
-            title={`${e.summary}\n\nOwner: ${e.owner}`}
-          >
-            <BookOpenCheck size={13} />
-            {e.name}
-            <span className="rounded bg-accent-500/15 px-1 font-mono text-[10px]">v{r.version}</span>
-          </Link>
-        )
-      })}
+    <div className="mt-3">
+      {domains.length > 1 && (
+        <p className="mb-1.5 flex items-center gap-1 text-[11px] text-gray-500" title="This answer combined approved Expertise from more than one domain">
+          <Layers size={11} /> Drew on: {domains.join(', ')}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-gray-500">Expertise applied</span>
+        {shown.map(({ r, e, domain }) => {
+          const meta = TAXONOMY.find((d) => d.domain === domain)
+          return (
+            <Link
+              key={r.id}
+              to={`/expertise/${r.id}`}
+              className="group flex items-center gap-1.5 rounded-lg bg-accent-500/10 px-2 py-1 text-xs text-accent-600 ring-1 ring-accent-500/25 transition hover:bg-accent-500/20 dark:text-accent-400"
+              title={`${e.summary}\n\nDomain: ${domain}\nOwner: ${e.owner}`}
+            >
+              <BookOpenCheck size={13} />
+              {e.name}
+              <span className="rounded bg-accent-500/15 px-1 font-mono text-[10px]">v{r.version}</span>
+              {domain && (
+                <span className="flex items-center gap-1 whitespace-nowrap border-l border-accent-500/25 pl-1.5 text-[10px] text-gray-600 dark:text-gray-400">
+                  <span className={`h-1.5 w-1.5 rounded-full ${meta?.dot || 'bg-gray-400'}`} />
+                  {domain}
+                </span>
+              )}
+            </Link>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -117,7 +139,7 @@ function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
 
       {!r.streaming && (
         <>
-          <ExpertiseUsed refs={r.expertise} />
+          <ExpertiseUsed refs={r.expertise} domainsCoordinated={r.domainsCoordinated} />
           <div className="mt-2 flex items-center gap-0.5 text-gray-500">
             <button className="icon-btn" onClick={copy} title="Copy">{copied ? <Check size={15} /> : <Copy size={15} />}</button>
             {!readOnly && <button className="icon-btn" onClick={() => regenerate(chatId, msg.id, idx)} title="Regenerate"><RefreshCw size={15} /></button>}
@@ -181,6 +203,35 @@ function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
 }
 
 
+// Shown under an answer only when weighing came into play for it (see checkForConflict in store.js):
+// the question asked about two areas or a trade-off, or the experts behind it conflict.
+function WeighedSection({ msg }) {
+  const result = msg.responses.find((r) => r.auto?.weigh)?.auto.weigh
+  if (msg.weighCheck === 'checking' && !result) {
+    return (
+      <p className="mt-3 flex items-center gap-1.5 text-xs text-gray-500 animate-fadeIn">
+        <Scale size={12} className="animate-pulse text-accent-500" /> Checking whether the experts agree…
+      </p>
+    )
+  }
+  if (!result) return null
+  const experts = result.experts || []
+  const domains = new Set(experts.map((x) => x.domain)).size
+  return (
+    <div className="mt-4 rounded-2xl p-4 ring-1 ring-accent-500/30 animate-fadeIn">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-accent-500/15 text-accent-600 dark:text-accent-400"><Scale size={13} /></span>
+        <span className="text-sm font-semibold">Experts weighed together</span>
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+          {domains === experts.length ? `${domains} domains` : `${experts.length} experts · ${domains} domains`}
+        </span>
+      </div>
+      {result.trigger && <p className="mt-1 text-xs text-gray-500">{result.trigger}</p>}
+      <WeighPanel result={result} />
+    </div>
+  )
+}
+
 export function AssistantMessage({ chatId, msg, readOnly = false }) {
   const compare = msg.responses.length > 1
   return (
@@ -188,6 +239,7 @@ export function AssistantMessage({ chatId, msg, readOnly = false }) {
       <div className={compare ? `grid gap-3 ${msg.responses.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'}` : ''}>
         {msg.responses.map((_, i) => <ResponseCard key={i} chatId={chatId} msg={msg} idx={i} compare={compare} readOnly={readOnly} />)}
       </div>
+      <WeighedSection msg={msg} />
       {!readOnly && <CaptureCard key={msg.detection ? 'detected' : 'none'} chatId={chatId} msg={msg} />}
     </div>
   )

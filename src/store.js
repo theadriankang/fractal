@@ -6,7 +6,7 @@ import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfo
 import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto, routeAutoWithFallback, makeAvailabilityChecker, getModel } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
-import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend, routeAutoBackend, refreshLiveModels, getModelAvailability } from './lib/api'
+import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend, routeAutoBackend, refreshLiveModels, getModelAvailability, weighExpertise } from './lib/api'
 import { DEMO_USERS, signIn, userById } from './data/users'
 import { supabase, hasSupabase } from './lib/supabase'
 import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit, deleteBlock } from './lib/permissions'
@@ -173,7 +173,8 @@ function streamResponse(get, chatId, msgId, idx, { prompt, matched, onFinish }) 
     { model: modelId, messages: historyBefore(chat, msgId, modelId), expertise: matched, routing },
     {
       // The backend reports the Expertise it actually applied (approved only).
-      onMeta: ({ expertise }) => patch((x) => ({ ...x, expertise })),
+      // Each ref now carries its domain; domainsCoordinated lists the domains this answer drew on.
+      onMeta: ({ expertise, domainsCoordinated }) => patch((x) => ({ ...x, expertise, domainsCoordinated })),
       onDelta: (t) => {
         text += t
         timer ??= setTimeout(flush, 50)
@@ -187,6 +188,30 @@ function streamResponse(get, chatId, msgId, idx, { prompt, matched, onFinish }) 
     abort()
     finish()
   }
+}
+
+// Automatic weighing. Alongside every answer, ask the backend whether this question needs the
+// experts weighed together: it does when the question names two areas or a trade-off, or when the
+// experts behind it actually conflict. Only then is the result kept, on the first response's `auto`
+// JSON (saved with the chat, no schema change), and shown under the answer. Failures stay silent:
+// the answer itself is unaffected.
+function checkForConflict(get, chatId, msgId, question, attachedIds) {
+  const patchMsg = (fn) => get().patchMessage(chatId, msgId, fn)
+  const chat = get().chats.find((c) => c.id === chatId)
+  const context = historyBefore(chat, msgId, null).slice(0, -1).slice(-6).map(({ role, content }) => ({ role, content: content.slice(0, 4000) }))
+  patchMsg((m) => ({ ...m, weighCheck: 'checking' }))
+  weighExpertise({ question, attachedIds, context, auto: true })
+    .then((result) => {
+      if (!result.triggered) return patchMsg((m) => ({ ...m, weighCheck: null }))
+      patchMsg((m) => ({
+        ...m,
+        weighCheck: null,
+        responses: m.responses.map((r, i) => (i === 0 ? { ...r, auto: { ...(r.auto || {}), weigh: result } } : r)),
+      }))
+      // If the answer already finished (and was saved), save again so the weighing is kept.
+      if (!streams.has(msgId)) saveMessage(get, chatId, msgId)
+    })
+    .catch(() => patchMsg((m) => ({ ...m, weighCheck: null })))
 }
 
 const defaultConnections = Object.fromEntries(
@@ -516,6 +541,8 @@ export const useStore = create(
         }
         const cancels = responses.map((_, idx) => streamResponse(get, chatId, asstMsg.id, idx, { prompt: text, matched, onFinish }))
         streams.set(asstMsg.id, cancels)
+        // Runs beside the answer: weighing only appears if this question needs it.
+        if (settings.autoApply) checkForConflict(get, chatId, asstMsg.id, text, attachedExpertise)
       },
 
       stopGeneration: (chatId) => {
