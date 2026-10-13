@@ -35,12 +35,25 @@ function Toast() {
 }
 
 function Shell() {
-  const { sidebarOpen, user, loadFromBackend, refreshModelAvailability } = useStore()
+  const { sidebarOpen, user, loadFromBackend, refreshModelAvailability, refreshSessionIfStale } = useStore()
   const location = useLocation()
   // Chats, the Library and the Review Queue load from Supabase for whoever is signed in.
   useEffect(() => { if (user) loadFromBackend() }, [user?.id])
   // Fetch model availability on app start so the picker and auto-router know which models have keys.
   useEffect(() => { refreshModelAvailability() }, [])
+  // Keep the signed-in account's Supabase access token alive. autoRefreshToken is off
+  // (src/lib/supabase.js), so without this a tab left open past the token's ~1h lifetime
+  // starts sending a dead bearer token and every backend request 401s ("Invalid or expired
+  // session token."). Refresh on sign-in, on an interval, and when the tab regains focus
+  // (covers the laptop-asleep case, which an interval alone misses).
+  useEffect(() => {
+    if (!user) return
+    refreshSessionIfStale()
+    const iv = setInterval(refreshSessionIfStale, 10 * 60 * 1000)
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshSessionIfStale() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVisible) }
+  }, [user?.id]) // eslint-disable-line
   // Signed out → sign-in page, then back to where the person was going.
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
 
