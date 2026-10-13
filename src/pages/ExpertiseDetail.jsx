@@ -19,7 +19,7 @@ import { itemKey, decisionStepText, isStructuredStep } from '../lib/decisionLogi
 
 const LIST_SECTIONS = [
   { key: 'knowledge', id: 'knowledge', title: 'Knowledge & heuristics', hint: 'What an expert knows that a newcomer doesn\'t. One per line.' },
-  { key: 'decisionLogic', id: 'decision-logic', title: 'Decision logic', ordered: true, hint: 'The steps an expert follows, in order. One per line.' },
+  { key: 'decisionLogic', id: 'decision-logic', title: 'Decision logic', ordered: true, hint: 'The steps an expert follows, in order. Add condition / action / reasoning / escalation for each when you know them.' },
   { key: 'guardrails', id: 'guardrails', title: 'Guardrails', tone: 'red', hint: 'What the AI must never recommend. One per line.' },
   { key: 'escalation', id: 'escalation', title: 'Escalation rules', tone: 'amber', hint: 'When a human must take over, and who. One per line.' },
 ]
@@ -142,6 +142,55 @@ function ListView({ items, ordered, tone }) {
         )
       })}
     </ol>
+  )
+}
+
+// Structured decision-step editor: lets a contributor author (not just view) the If/Then/
+// Because/Escalate-if breakdown behind a decision-logic line, instead of a plain-text
+// textarea that silently flattens any structure the moment a human touches it. Accepts
+// mixed legacy (plain string) and structured items, normalizes each to the full object
+// shape for editing, and reports the whole array back on every change.
+function toStep(x) {
+  return typeof x === 'string'
+    ? { text: x, condition: '', action: '', reasoning: '', escalateIf: '' }
+    : { text: '', condition: '', action: '', reasoning: '', escalateIf: '', ...x }
+}
+
+function DecisionStepField({ label, value, onChange, placeholder, tone }) {
+  return (
+    <label className="block text-xs">
+      <span className={`mb-0.5 block font-medium ${tone || 'text-gray-500 dark:text-gray-400'}`}>{label}</span>
+      <input className="input py-1.5 text-[13px]" value={value} placeholder={placeholder} onChange={(ev) => onChange(ev.target.value)} />
+    </label>
+  )
+}
+
+function DecisionLogicEditor({ items, onChange }) {
+  const steps = (items || []).map(toStep)
+  const update = (i, patch) => onChange(steps.map((s, idx) => (idx === i ? { ...s, ...patch } : s)))
+  const remove = (i) => onChange(steps.filter((_, idx) => idx !== i))
+  const add = () => onChange([...steps, toStep('')])
+
+  return (
+    <div className="mt-2 space-y-3">
+      {steps.map((s, i) => (
+        <div key={i} className="rounded-xl p-3 ring-1 ring-gray-200 dark:ring-gray-800">
+          <div className="flex items-start gap-2">
+            <span className="mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{i + 1}</span>
+            <textarea rows={1} className="input flex-1 resize-none leading-relaxed" placeholder="The step itself, in one line" value={s.text}
+              onChange={(ev) => update(i, { text: ev.target.value })} />
+            <button type="button" onClick={() => remove(i)} className="mt-1.5 shrink-0 text-gray-400 hover:text-red-500" title="Remove step"><X size={15} /></button>
+          </div>
+          <div className="mt-2 grid gap-2 pl-8 sm:grid-cols-2">
+            <DecisionStepField label="If (condition)" placeholder="e.g. CHWST > 7°C for 10 min" value={s.condition} onChange={(v) => update(i, { condition: v })} />
+            <DecisionStepField label="Then (action)" placeholder="what the expert does" value={s.action} onChange={(v) => update(i, { action: v })} />
+            <DecisionStepField label="Because (reasoning)" placeholder="optional — why this action" value={s.reasoning} onChange={(v) => update(i, { reasoning: v })} />
+            <DecisionStepField label="Escalate if" tone="text-amber-600 dark:text-amber-400" placeholder="optional — when to hand off to a human" value={s.escalateIf} onChange={(v) => update(i, { escalateIf: v })} />
+          </div>
+        </div>
+      ))}
+      <button type="button" onClick={add} className="btn-outline text-xs"><Plus size={14} /> Add step</button>
+    </div>
   )
 }
 
@@ -443,18 +492,21 @@ export default function ExpertiseDetail() {
   const cancel = () => { setParams({}); setDraft(null) }
   const save = () => {
     const meta = { name: draft.name, domain: draft.domain, topic: draft.topic, assetTypes: draft.assetTypes, summary: draft.summary, whenToUse: draft.whenToUse, owner: draft.owner, keywords: draft.keywords }
+    // The decision-logic editor leaves a blank step (empty text) while someone's mid-way through
+    // filling one in -- drop those before diffing/saving so they never reach governance or the DB.
+    const cleanDraft = { ...draft, decisionLogic: draft.decisionLogic.filter((x) => itemKey(x).trim()) }
     if (e.status === 'approved') {
       const changes = {}
       for (const f of ['knowledge', 'decisionLogic', 'guardrails', 'escalation']) {
-        const draftKeys = new Set(draft[f].map(itemKey)), liveKeys = new Set(e[f].map(itemKey))
-        const add = draft[f].filter((x) => !liveKeys.has(itemKey(x))), remove = e[f].filter((x) => !draftKeys.has(itemKey(x)))
+        const draftKeys = new Set(cleanDraft[f].map(itemKey)), liveKeys = new Set(e[f].map(itemKey))
+        const add = cleanDraft[f].filter((x) => !liveKeys.has(itemKey(x))), remove = e[f].filter((x) => !draftKeys.has(itemKey(x)))
         if (add.length || remove.length) changes[f] = { add, remove }
       }
       updateExpertise(e.id, meta)
       if (Object.keys(changes).length) proposeRevision(e.id, changes, 'Edited by ' + user.name)
       else showToast('Saved')
     } else {
-      updateExpertise(e.id, draft)
+      updateExpertise(e.id, cleanDraft)
       showToast('Draft saved')
     }
     setParams({})
@@ -631,7 +683,11 @@ export default function ExpertiseDetail() {
             {editing ? (
               <>
                 <p className="mb-1.5 mt-1 text-xs text-gray-500">{s.hint}</p>
-                <textarea rows={Math.max(3, draft[s.key].length + 1)} className="input resize-y leading-relaxed" defaultValue={draft[s.key].map(decisionStepText).join('\n')} onBlur={(ev) => setList(s.key, ev.target.value)} />
+                {s.key === 'decisionLogic' ? (
+                  <DecisionLogicEditor items={draft.decisionLogic} onChange={(steps) => set({ decisionLogic: steps })} />
+                ) : (
+                  <textarea rows={Math.max(3, draft[s.key].length + 1)} className="input resize-y leading-relaxed" defaultValue={draft[s.key].map(decisionStepText).join('\n')} onBlur={(ev) => setList(s.key, ev.target.value)} />
+                )}
               </>
             ) : (
               <ListView items={e[s.key]} ordered={s.ordered} tone={s.tone} />
