@@ -17,6 +17,7 @@ from itertools import combinations, permutations
 from ..capture.extract import grounded
 from ..config import settings
 from ..models import Expertise
+from ..schemas import decision_step_text
 from .schemas import (
     ContextTurn, Escalation, Expert, Overlap, Perspective, Suggestion, Tension, View, WeighResult,
 )
@@ -134,13 +135,28 @@ MAX_SUGGESTIONS = 6
 MAX_GAPS = 4
 
 
+# ---------------------------------------------------------------- reading the records
+
+def _steps(e: Expertise) -> list[str]:
+    """Decision steps as display lines. Entries are DecisionStep dicts (or older plain strings);
+    their `text` is the original line and the stable identity used elsewhere (governance diffs)."""
+    out = []
+    for x in e.decision_logic or []:
+        line = (x.get("text") if isinstance(x, dict) else None) or decision_step_text(x)
+        if str(line).strip():
+            out.append(str(line).strip())
+    return out
+
+
 # ---------------------------------------------------------------- prompt + model call
 
 def _block(x: Expert, e: Expertise) -> str:
     lines = [f'<expertise id="{x.id}" name="{x.name}" domain="{x.domain}" owner="{x.owner}" version="{x.version}">']
     lines.append(f"Summary: {e.summary or ''}")
     lines.append(f"When to use: {e.when_to_use or ''}")
-    for title, items in (("Knowledge", e.knowledge), ("Decision logic (in order)", e.decision_logic),
+    # Steps are shown with their condition/action/reasoning folded in, like the chat prompt does.
+    steps = [decision_step_text(x) for x in e.decision_logic or []]
+    for title, items in (("Knowledge", e.knowledge), ("Decision logic (in order)", steps),
                          ("Guardrails (never violate)", e.guardrails), ("Escalate when", e.escalation)):
         lines.append(f"{title}:")
         lines += [f"- {i}" for i in items or []]
@@ -174,7 +190,7 @@ async def call_model(question: str, picked: Picked, context, client) -> dict | N
 # ---------------------------------------------------------------- deterministic parts (always from the records)
 
 def _lines(e: Expertise) -> list[str]:
-    return [*(e.knowledge or []), *(e.decision_logic or []), *(e.guardrails or []), *(e.escalation or []),
+    return [*(e.knowledge or []), *_steps(e), *(e.guardrails or []), *(e.escalation or []),
             *([e.when_to_use] if e.when_to_use else [])]
 
 
@@ -329,7 +345,7 @@ def rules_weigh(picked: Picked) -> dict:
     """Plain text matching: shared terms = overlap; a step sharing terms with another domain's guardrail = tension."""
     perspectives = {
         x.id: Perspective(expertiseId=x.id, position=e.summary or x.name,
-                          keyPoints=list((e.decision_logic or [])[:MAX_POINTS]), concerns=list((e.guardrails or [])[:MAX_POINTS]))
+                          keyPoints=_steps(e)[:MAX_POINTS], concerns=list((e.guardrails or [])[:MAX_POINTS]))
         for x, e in picked
     }
 
@@ -348,7 +364,7 @@ def rules_weigh(picked: Picked) -> dict:
     tensions = []
     for (xa, ea), (xb, eb) in permutations(picked, 2):
         best = None
-        for step in ea.decision_logic or []:
+        for step in _steps(ea):
             for rule in eb.guardrails or []:
                 n = len(_terms(step) & _terms(rule))
                 if n >= 2 and (best is None or n > best[0]):
@@ -362,9 +378,9 @@ def rules_weigh(picked: Picked) -> dict:
 
     suggestions = []
     for x, e in picked:
-        if not e.decision_logic:
+        if not _steps(e):
             continue
-        step = e.decision_logic[0]
+        step = _steps(e)[0]
         views = []
         for y, f in picked:
             if y.id == x.id:

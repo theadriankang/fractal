@@ -229,3 +229,24 @@ def test_endpoint_returns_result_with_markdown(db, monkeypatch):
 
 def test_endpoint_rejects_empty_question():
     assert TestClient(app).post("/api/expertise/weigh", json={"question": ""}).status_code == 422
+
+
+# ---------------------------------------------------------------- structured decision steps (DecisionStep)
+
+def test_structured_decision_steps_are_read_as_text(db):
+    """decisionLogic entries are now DecisionStep dicts, not plain strings: every path must read them."""
+    peak = db.get(Expertise, "exp-energy-peak")
+    peak.decision_logic = [{
+        "text": PEAK["decision_logic"][0], "condition": "Peaks cluster at morning start-up",
+        "action": "Pre-cool tenant floors and let space temperature float", "reasoning": "Shifts load off the peak", "escalateIf": "",
+    }]
+    db.commit()
+    picked = picked_for(db, ["exp-energy-peak", "exp-tenant-complaint"])
+    prompt = engine.build_prompt("q", picked)
+    assert PEAK["decision_logic"][0] in prompt and "{'text'" not in prompt
+    parts = rules_weigh(picked)
+    assert parts["perspectives"]["exp-energy-peak"].keyPoints == [PEAK["decision_logic"][0]]
+    assert any(t.ideaFrom == "exp-energy-peak" for t in parts["tensions"])
+    assert parts["suggestions"][0].text == PEAK["decision_logic"][0]
+    # A model quoting the step back (as the prompt rendered it) still traces to the record.
+    assert engine._evidence(engine.decision_step_text(peak.decision_logic[0]), peak) == PEAK["decision_logic"][0]
