@@ -212,7 +212,9 @@ export default function Insights() {
                     {(active.qaHistory || []).map((row, i) => (
                       <div key={i} className="space-y-1.5 border-b border-gray-100 pb-3 last:border-0 last:pb-0 dark:border-gray-850">
                         <p className="text-sm font-medium">{row.question}</p>
-                        <p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{row.answer}</p>
+                        <div className="prose prose-sm max-w-none text-gray-700 dark:prose-invert dark:text-gray-300 prose-headings:mb-1 prose-headings:mt-3 prose-p:my-1.5 prose-li:my-0.5">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{row.answer}</ReactMarkdown>
+                        </div>
                         {row.domainsCoordinated?.length > 0 && (
                           <p className="flex items-center gap-1 text-[11px] text-gray-500">
                             <AlertTriangle size={11} /> Drew on: {row.domainsCoordinated.join(', ')}
