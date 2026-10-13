@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { BookOpenCheck, Copy, FileText, Loader2, Mail, Search, Sparkles, X } from 'lucide-react'
 import { useStore } from '../store'
 import { DOMAINS } from '../data/expertise'
@@ -121,7 +123,7 @@ export default function WritingAssistant() {
               {result && <>
                 {result.demo && <p className="mt-4 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">Demo preview: source excerpts only. Connect Claude for a tailored summary or email draft.</p>}
                 {stale && <p role="alert" className="mt-4 rounded-lg bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">A source has changed or is no longer approved. Generate again using the current references.</p>}
-                {result.mode === 'summary' ? <p className="mt-5 whitespace-pre-wrap text-sm leading-7 text-gray-700 dark:text-gray-300">{result.summary}</p> : <div className="mt-5 space-y-4"><p className="text-xs text-gray-500">Editable draft · prepared for {user.name}</p><label className="block text-sm font-medium">Subject<input className="input mt-2" value={result.email.subject} onChange={(e) => setResult((r) => ({ ...r, email: { ...r.email, subject: e.target.value } }))} /></label><label className="block text-sm font-medium">Message<textarea className="input mt-2 min-h-[360px] resize-y font-normal leading-6" value={result.email.body} onChange={(e) => setResult((r) => ({ ...r, email: { ...r.email, body: e.target.value } }))} /></label></div>}
+                {result.mode === 'summary' ? <div className="prose prose-sm mt-5 max-w-none text-gray-700 dark:prose-invert dark:text-gray-300 prose-p:leading-7 prose-li:my-0.5 sm:prose-base sm:text-[15px]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{result.summary}</ReactMarkdown></div> : <div className="mt-5 space-y-4"><p className="text-xs text-gray-500">Editable draft · prepared for {user.name}</p><label className="block text-sm font-medium">Subject<input className="input mt-2" value={result.email.subject} onChange={(e) => setResult((r) => ({ ...r, email: { ...r.email, subject: e.target.value } }))} /></label><label className="block text-sm font-medium">Message<textarea className="input mt-2 min-h-[360px] resize-y font-normal leading-6" value={result.email.body} onChange={(e) => setResult((r) => ({ ...r, email: { ...r.email, body: e.target.value } }))} /></label></div>}
                 {result.missingInformation.length > 0 && <div className="mt-6 rounded-xl bg-gray-50 p-4 dark:bg-gray-850"><h3 className="text-sm font-medium">Details to confirm</h3><ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-gray-500">{result.missingInformation.map((item, i) => <li key={i}>{item}</li>)}</ul></div>}
                 <div className="mt-6 border-t border-gray-100 pt-5 dark:border-gray-800"><h3 className="text-sm font-medium">Supporting Expertise</h3><div className="mt-3 space-y-4">{result.citations.map((citation, i) => {
                   const ref = result.references.find((e) => e.id === citation.expertiseId)
