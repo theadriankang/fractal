@@ -32,7 +32,7 @@ function Welcome({ onSend }) {
           <button
             key={s.title}
             onClick={() => onSend(s.prompt, { weigh: !!s.weigh })}
-            className={`group rounded-2xl px-4 py-3 text-left ring-1 ring-gray-200 transition hover:bg-gray-50 dark:ring-gray-800 dark:hover:bg-gray-850 ${s.weigh ? 'sm:col-span-2' : ''}`}
+            className={`group rounded-2xl px-4 py-3 text-left ring-1 ring-gray-200 transition hover:bg-gray-50 dark:ring-gray-800 dark:hover:bg-gray-850 ${s.weigh ? 'ring-accent-500/30 dark:ring-accent-500/30' : ''}`}
           >
             <p className="flex items-center gap-1.5 text-sm font-medium">{s.weigh && <Scale size={14} className="text-accent-500" />}{s.title}</p>
             <p className="text-sm text-gray-500">{s.sub}</p>

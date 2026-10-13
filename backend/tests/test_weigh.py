@@ -85,9 +85,12 @@ def test_one_voice_per_domain_plus_linked_domains_and_never_unapproved(db, monke
     monkeypatch.setattr(index, "search", hits(("exp-energy-peak", 0.71), ("exp-chiller-seq", 0.66), ("exp-chiller-fault", 0.52)))
     picked = select_experts(db, "Can we pre-cool to cut the Monday peak?")
     got = [(x.id, x.via) for x, _ in picked]
-    # Sequencing is dropped (Energy already has a voice); Tenant joins through Chiller's / Peak's related links.
-    assert got == [("exp-energy-peak", "search"), ("exp-chiller-fault", "search"), ("exp-tenant-complaint", "linked")]
+    # Tenant joins through Peak's related link; Sequencing is not seated as a search hit (Energy already
+    # has a voice) but comes last as a linked second Energy voice.
+    assert got == [("exp-energy-peak", "search"), ("exp-chiller-fault", "search"), ("exp-tenant-complaint", "linked"),
+                   ("exp-chiller-seq", "linked")]
     assert picked[2][0].reason == "linked from Peak Demand Shaving"
+    assert picked[3][0].reason == "same domain, linked from Peak Demand Shaving"
     assert "exp-lease-renewal" not in [x.id for x, _ in picked]
 
 
@@ -222,8 +225,9 @@ def test_endpoint_returns_result_with_markdown(db, monkeypatch):
         app.dependency_overrides.clear()
     assert res.status_code == 200
     body = res.json()
-    assert [x["domain"] for x in body["experts"]] == ["Energy Optimisation", "Technical Services", "Tenant Experience"]
-    assert body["mode"] == "rules" and body["markdown"].startswith("**Weighed across 3 domain(s).**")
+    assert [x["domain"] for x in body["experts"]] == ["Energy Optimisation", "Technical Services", "Tenant Experience",
+                                                      "Energy Optimisation"]
+    assert body["mode"] == "rules" and body["markdown"].startswith("**Weighed 4 experts across 3 domains.**")
     assert "Loop in before acting" in body["markdown"]
 
 
@@ -250,3 +254,36 @@ def test_structured_decision_steps_are_read_as_text(db):
     assert parts["suggestions"][0].text == PEAK["decision_logic"][0]
     # A model quoting the step back (as the prompt rendered it) still traces to the record.
     assert engine._evidence(engine.decision_step_text(peak.decision_logic[0]), peak) == PEAK["decision_logic"][0]
+
+
+# ---------------------------------------------------------------- two Expertise from the same domain
+
+def test_same_domain_second_voice_only_when_linked_and_capped(db, monkeypatch):
+    monkeypatch.setattr(index, "search", hits(("exp-energy-peak", 0.71)))
+    picked = select_experts(db, "pre-cool on Monday to cut the peak", max_experts=4)
+    energy = [x.id for x, _ in picked if x.domain == "Energy Optimisation"]
+    assert energy == ["exp-energy-peak", "exp-chiller-seq"]  # linked → seated, never more than two
+    # Not linked to anything seated in its own domain → no second voice.
+    db.get(Expertise, "exp-energy-peak").related = ["exp-tenant-complaint"]
+    db.get(Expertise, "exp-chiller-fault").related = []
+    db.commit()
+    picked = select_experts(db, "pre-cool on Monday to cut the peak", max_experts=4)
+    assert [x.id for x, _ in picked if x.domain == "Energy Optimisation"] == ["exp-energy-peak"]
+
+
+def test_same_domain_tension_keeps_its_deciding_factor(db):
+    picked = picked_for(db, ["exp-energy-peak", "exp-chiller-seq"])
+    raw = {
+        "summary": "s", "perspectives": [], "overlaps": [], "suggestions": [],
+        "tensions": [{
+            "point": "Pre-cooling runs chillers at low part load", "idea_from": "exp-energy-peak",
+            "constraint_from": "exp-chiller-seq", "evidence": SEQ["decision_logic"][0], "severity": "caution",
+            "deciding_factor": "Net saving = peak kW cut × demand rate − extra pre-cooling kWh × energy rate.",
+        }],
+    }
+    parts, dropped = validate(raw, picked)
+    (t,) = parts["tensions"]
+    assert dropped == 0 and t.decidingFactor.startswith("Net saving")
+    md = engine.to_markdown(assemble("q", picked, parts, mode="model"))
+    assert "Energy Optimisation (Peak Demand Shaving)" in md and "Deciding factor: Net saving" in md
+

@@ -108,13 +108,15 @@ const markdownComponents = {
 }
 
 function WeighBadge({ response }) {
-  const n = response.auto?.weigh?.experts?.length
+  const experts = response.auto?.weigh?.experts || []
+  const n = experts.length
+  const d = new Set(experts.map((x) => x.domain)).size
   return (
     <div className="flex items-center gap-2">
       <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-accent-500/15 text-accent-600 dark:text-accent-400"><Scale size={13} /></span>
       <span className="text-sm font-semibold">Fractal · Weighed across domains</span>
       {!response.streaming && n > 0 && (
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">{n} {n === 1 ? 'domain' : 'domains'}</span>
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">{d === n ? `${d} ${d === 1 ? 'domain' : 'domains'}` : `${n} experts · ${d} ${d === 1 ? 'domain' : 'domains'}`}</span>
       )}
     </div>
   )

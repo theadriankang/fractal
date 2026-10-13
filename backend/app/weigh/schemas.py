@@ -63,6 +63,9 @@ class Tension(BaseModel):
     detail: str = ""
     severity: Literal["blocker", "caution"] = "caution"
     reconcile: str = ""  # how the two could still work together
+    # The measurable thing a person should check to decide between the two, e.g. "net saving =
+    # peak kW cut × demand rate − extra pre-cooling kWh × energy rate". Empty when none applies.
+    decidingFactor: str = ""
 
 
 class View(BaseModel):

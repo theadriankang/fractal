@@ -5,6 +5,9 @@
    hit" cutoff, so a strong Energy match doesn't silence a weaker but relevant Tenant one).
 3. Then the experts those picks already point to in *other* domains (their `related` links):
    the organisation has said these pieces of know-how belong together, so they get a seat too.
+4. Last, a second voice from the *same* domain, but only when it is linked to that domain's
+   pick: two Energy playbooks (say peak shaving and chiller sequencing) can pull against each
+   other, and that trade-off needs weighing as much as a cross-domain one.
 
 Only approved Expertise is ever returned (PROJECT_CONTEXT rule 4).
 """
@@ -15,7 +18,8 @@ from ..models import Expertise
 from ..retrieval import index
 from .schemas import Expert
 
-MAX_EXPERTS = 4  # four domains is about as many as one person can weigh at once
+MAX_EXPERTS = 4  # four voices is about as many as one person can weigh at once
+MAX_PER_DOMAIN = 2
 SEARCH_POOL = 20
 
 
@@ -39,12 +43,12 @@ def select_experts(
 
     picked: list[tuple[Expert, Expertise]] = []
     seen: set[str] = set()
-    domains: set[str] = set()
+    domains: dict[str, int] = {}
 
     def add(e: Expertise, via: str, reason: str) -> None:
         picked.append((_expert(e, via, reason), e))
         seen.add(e.id)
-        domains.add(e.domain)
+        domains[e.domain] = domains.get(e.domain, 0) + 1
 
     for aid in attached_ids:
         if aid in rows and aid not in seen and len(picked) < max_experts:
@@ -67,5 +71,16 @@ def select_experts(
             r = db.get(Expertise, rid)
             if r is not None and r.status == "approved" and r.domain not in domains:
                 add(r, "linked", f"linked from {src.name}")
+
+    for _, src in list(picked):
+        for rid in src.related or []:
+            if len(picked) >= max_experts:
+                break
+            if rid in seen:
+                continue
+            r = rows.get(rid) or db.get(Expertise, rid)
+            if (r is not None and r.status == "approved" and r.domain == src.domain
+                    and domains.get(r.domain, 0) < MAX_PER_DOMAIN):
+                add(r, "linked", f"same domain, linked from {src.name}")
 
     return picked

@@ -1,6 +1,7 @@
 // Renders a "Weigh across domains" result (POST /api/expertise/weigh). Not a comparison: every
 // domain keeps its own voice, then the panel shows where they agree, where one domain's idea runs
 // into another domain's rule, and suggestions that still carry each expert's view of them.
+import { createContext, useContext } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Scale, Handshake, TriangleAlert, OctagonAlert, Lightbulb, UserCheck, CircleHelp, CircleCheck, CircleDot, Link2, Info,
@@ -9,8 +10,14 @@ import { TAXONOMY } from '../data/taxonomy'
 
 const domainMeta = (domain) => TAXONOMY.find((d) => d.domain === domain)
 
-function DomainPill({ expert, showName = false }) {
+// Domains with two experts in this weighing: their pills also name the Expertise, so
+// "Energy Optimisation meets Energy Optimisation" never appears.
+const SharedDomains = createContext(new Set())
+
+function DomainPill({ expert, showName: forced = false }) {
+  const shared = useContext(SharedDomains)
   if (!expert) return null
+  const showName = forced || shared.has(expert.domain)
   const meta = domainMeta(expert.domain)
   const Icon = meta?.icon
   return (
@@ -50,11 +57,14 @@ export default function WeighPanel({ result }) {
     .map((x) => ({ x, lines: result.escalations.filter((e) => e.expertiseId === x.id) }))
     .filter((g) => g.lines.length)
 
+  const shared = new Set(result.experts.map((x) => x.domain).filter((d, i, all) => all.indexOf(d) !== i))
+
   if (!result.experts.length) {
     return <p className="mt-2 text-[15px] text-gray-600 dark:text-gray-400">{result.summary}</p>
   }
 
   return (
+    <SharedDomains.Provider value={shared}>
     <div className="mt-2 text-[15px]">
       <div className="flex flex-wrap items-center gap-1.5">
         {result.experts.map((x) => <DomainPill key={x.id} expert={x} />)}
@@ -122,7 +132,7 @@ export default function WeighPanel({ result }) {
       )}
 
       {result.tensions.length > 0 && (
-        <Section icon={TriangleAlert} tone="text-amber-500" title="Where an idea may not hold" hint="one domain’s idea meets another’s rule">
+        <Section icon={TriangleAlert} tone="text-amber-500" title="Where an idea may not hold" hint="one expert’s idea meets another’s rule">
           <ul className="space-y-2">
             {result.tensions.map((t, i) => {
               const blocker = t.severity === 'blocker'
@@ -147,6 +157,12 @@ export default function WeighPanel({ result }) {
                   </blockquote>
                   {t.reconcile && (
                     <p className="mt-1.5 text-sm"><span className="font-medium text-emerald-600 dark:text-emerald-400">To make it work together: </span>{t.reconcile}</p>
+                  )}
+                  {t.decidingFactor && (
+                    <p className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-white/60 px-2 py-1.5 text-sm ring-1 ring-gray-200 dark:bg-gray-900/40 dark:ring-gray-700">
+                      <Scale size={14} className="mt-0.5 shrink-0 text-accent-500" />
+                      <span><span className="font-medium">Deciding factor: </span>{t.decidingFactor}</span>
+                    </p>
                   )}
                 </li>
               )
@@ -222,5 +238,6 @@ export default function WeighPanel({ result }) {
         {result.dropped > 0 && ` ${result.dropped} model claim(s) that couldn’t be traced to approved Expertise were removed.`}
       </p>
     </div>
+    </SharedDomains.Provider>
   )
 }

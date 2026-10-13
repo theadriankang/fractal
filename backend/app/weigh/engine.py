@@ -73,6 +73,7 @@ TOOL = {
                         "detail": {"type": "string", "description": "One or two sentences: why the idea may not hold."},
                         "severity": {"type": "string", "enum": ["blocker", "caution"], "description": "blocker = following the idea as-is would break a guardrail; caution = works only with care."},
                         "reconcile": {"type": "string", "description": "How the two experts could still work together."},
+                        "deciding_factor": {"type": "string", "description": "The measurable factor a person should check to decide between the two ideas, e.g. a cost, threshold or reading named in the Expertise, written as a short comparison. Empty if none applies."},
                     },
                     "required": ["point", "idea_from", "constraint_from", "evidence", "severity"],
                 },
@@ -115,7 +116,8 @@ SYSTEM = """You weigh approved Expertise from different domains of a real-estate
 Do NOT pick a winner or compare which expert is better. Weigh them together:
 1. perspectives — for every Expertise, what that expert would push for on this question, in their own terms.
 2. overlaps — where two or more experts agree, reinforce each other or depend on the same fact. This is the common ground for working together.
-3. tensions — where an idea one expert would push for may not work as well because of another expert's guardrail, knowledge or escalation rule. Say whose idea (idea_from), whose rule (constraint_from), copy that rule's exact line from constraint_from's Expertise as evidence, mark it blocker (a guardrail would be broken) or caution (works only with care), and say how they could reconcile.
+3. tensions — where an idea one expert would push for may not work as well because of another expert's guardrail, knowledge or escalation rule. Say whose idea (idea_from), whose rule (constraint_from), copy that rule's exact line from constraint_from's Expertise as evidence, mark it blocker (a guardrail would be broken) or caution (works only with care), say how they could reconcile, and name the deciding factor: the measurable thing (cost, threshold, reading) a person should check to choose between them.
+Two Expertise can come from the same domain. They can still pull against each other (for example, cutting peak demand vs running the plant at its most efficient load); weigh them exactly as you would two domains.
 4. suggestions — a way forward that combines the experts. For each, list the Expertise it draws on and how every other expert views it (supports / conditional / concern, with a short note). Keep dissent visible.
 5. gaps — what the question needs that none of the Expertise covers.
 
@@ -287,6 +289,7 @@ def validate(raw: dict | None, picked: Picked) -> tuple[dict, int] | None:
         tensions.append(Tension(
             point=_s(t["point"], 160), ideaFrom=a, constraintFrom=b, evidence=line, detail=_s(t.get("detail")),
             severity="blocker" if t.get("severity") == "blocker" else "caution", reconcile=_s(t.get("reconcile")),
+            decidingFactor=_s(t.get("deciding_factor"), 300),
         ))
 
     suggestions = []
@@ -411,10 +414,10 @@ def assemble(question: str, picked: Picked, parts: dict, *, mode: str, model: st
     # Every expert keeps a voice: fill any perspective the model left out from the record itself.
     fallback = rules_weigh(picked)["perspectives"] if mode == "model" else {}
     perspectives = [parts["perspectives"].get(x.id) or fallback.get(x.id) for x in experts]
-    domains = ", ".join(x.domain for x in experts)
+    domains = list(dict.fromkeys(x.domain for x in experts))
     summary = parts.get("summary") or (
-        f"Weighed {len(experts)} domains ({domains}): {len(parts['overlaps'])} point(s) of agreement and "
-        f"{len(parts['tensions'])} possible conflict(s)."
+        f"{len(parts['overlaps'])} point(s) of agreement and {len(parts['tensions'])} possible conflict(s) "
+        f"between {', '.join(domains)}."
     )
     return WeighResult(
         question=question, mode=mode, model=model, summary=summary, experts=experts,
@@ -452,23 +455,33 @@ async def weigh(question: str, picked: Picked, context: list[ContextTurn] | None
 
 # ---------------------------------------------------------------- plain-text form (chat history, copy button)
 
+def _count(experts: list[Expert]) -> str:
+    """'3 domains', or '4 experts across 3 domains' when two share a domain."""
+    d = len({x.domain for x in experts})
+    domains = f"{d} domain" + ("s" if d != 1 else "")
+    return domains if d == len(experts) else f"{len(experts)} experts across {domains}"
+
+
 def to_markdown(r: WeighResult) -> str:
     name = {x.id: x for x in r.experts}
     label = lambda i: f"{name[i].domain} ({name[i].name})" if i in name else i  # noqa: E731
-    out = [f"**Weighed across {len(r.experts)} domain(s).** {r.summary}"]
+    shared = {d for d in (x.domain for x in r.experts) if sum(y.domain == d for y in r.experts) > 1}
+    short = lambda i: label(i) if i in name and name[i].domain in shared else (name[i].domain if i in name else i)  # noqa: E731
+    out = [f"**Weighed {_count(r.experts)}.** {r.summary}"]
     if r.perspectives:
         out.append("\n**Each expert's view**")
         out += [f"- **{label(p.expertiseId)}:** {p.position}" for p in r.perspectives]
     if r.overlaps:
         out.append("\n**Where they agree**")
-        out += [f"- {o.point} ({', '.join(name[i].domain for i in o.expertiseIds if i in name)})"
+        out += [f"- {o.point} ({', '.join(short(i) for i in o.expertiseIds if i in name)})"
                 + (f" {o.detail}" if o.detail else "") for o in r.overlaps]
     if r.tensions:
         out.append("\n**Where an idea may not hold**")
         for t in r.tensions:
             sev = "Blocker" if t.severity == "blocker" else "Caution"
             out.append(f"- {sev}: {t.point}. {t.detail} (Rule from {label(t.constraintFrom)}: \"{t.evidence}\")"
-                       + (f" Reconcile: {t.reconcile}" if t.reconcile else ""))
+                       + (f" Reconcile: {t.reconcile}" if t.reconcile else "")
+                       + (f" Deciding factor: {t.decidingFactor}" if t.decidingFactor else ""))
     if r.suggestions:
         out.append("\n**Suggested way forward** (suggestions — the specialists decide)")
         for i, s in enumerate(r.suggestions, 1):
