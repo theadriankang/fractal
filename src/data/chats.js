@@ -39,4 +39,6 @@ export const SUGGESTIONS = [
   { title: 'Cut peak demand', sub: 'without hurting tenant comfort', prompt: 'Our Monday morning peak demand keeps breaching contracted capacity. How can we reduce it?' },
   { title: 'Spot renewal risk', sub: 'tenants expiring in 18 months', prompt: 'Which signals should I look at to spot tenants who may not renew their lease next year?' },
   { title: 'Respond to a complaint', sub: 'air quality on Level 12', prompt: 'A tenant on Level 12 complained about stuffy air for the third time this month. How should I respond?' },
+  // Runs in "Weigh across domains" mode: Energy, Technical Services and Tenant Experience all have a say.
+  { title: 'Weigh a plan across domains', sub: 'pre-cooling vs. a tenant who keeps complaining', weigh: true, prompt: 'We want to pre-cool Tower A from 7:00 and let floors float to 25 °C on Monday mornings to cut the peak demand charge. The tenant on Level 23 has complained about warm air twice this month. Should we go ahead?' },
 ]
