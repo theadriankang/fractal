@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     extraction_threshold: float = 0.6  # below this confidence, nothing is proposed
     extraction_min_words: int = 12  # skip short messages (questions, small talk)
 
+    # Cross-domain weighing (POST /api/expertise/weigh): weighs several domains' Expertise at once,
+    # so it uses a stronger reasoning model than the extractor. Unset key = quick text-matching mode.
+    weigh_model: str = "claude-sonnet-5-5"
+
     # Expertise retrieval (embeddings)
     embedding_provider: str = "local"  # "local" (fastembed) or "litellm"
     embedding_model: str = ""  # for litellm, e.g. "text-embedding-3-small"

@@ -142,11 +142,14 @@ def search(
     *,
     attached_ids: list[str] | None = None,
     limit: int = 2,
+    relative_cutoff: float | None = RELATIVE_CUTOFF,
 ) -> list[dict]:
     """Hybrid ranking: cosine similarity + keyword overlap boost.
 
     Returns approved-only matches with score ≥ MIN_SCORE_THRESHOLD.
     ``attached_ids`` are always included (scored, but not filtered out).
+    ``relative_cutoff=None`` keeps every match above the threshold — cross-domain weighing
+    (app/weigh) wants the best voice from each domain, not only the ones close to the top hit.
     """
     attached_ids = attached_ids or []
     has_vector = _ensure_table(db)
@@ -158,9 +161,9 @@ def search(
 
     # Drop weak tag-alongs: keep matches within RELATIVE_CUTOFF of the best one, so a clearly
     # relevant hit doesn't drag in loosely related Expertise. Attached ones always stay.
-    if results:
+    if results and relative_cutoff is not None:
         best = max(r["score"] for r in results)
-        results = [r for r in results if r["id"] in attached_ids or r["score"] >= best * RELATIVE_CUTOFF]
+        results = [r for r in results if r["id"] in attached_ids or r["score"] >= best * relative_cutoff]
 
     return results[:limit]
 
