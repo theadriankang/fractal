@@ -18,23 +18,35 @@ Version-controlled (rollback) · Secure (role-based access) · Clearly bounded (
 
 ## Repo layout
 ```
-/                     React 18 + Vite + Tailwind front end (DONE — UI complete, currently uses mocks)
+/                     React 18 + Vite + Tailwind front end (DONE — live, talks to the real backend via src/lib/api.js;
+                      src/lib/mockApi.js is kept only as an on-stage fallback behind VITE_USE_MOCK=true)
   src/store.js        Zustand store — ALL state + actions (chats, expertise, proposals, settings, user role)
-  src/lib/mockApi.js  The ONLY mock layer: matchExpertise, buildReply, streamText, detectExpertise, suggestTitle
+  src/lib/api.js      Live backend client: streaming chat, Expertise match/detect, cross-domain Weigh, Data Insights, file uploads
+  src/lib/mockApi.js  On-stage fallback only (VITE_USE_MOCK=true): matchExpertise, buildReply, streamText, detectExpertise, suggestTitle
   src/data/models.js  Providers, model list (front-end ids like 'claude-sonnet'), routeAuto() keyword router, ROUTES
   src/data/expertise.js  Seed Expertise + STATUSES + CONTENT_FIELDS (the Expertise schema lives here)
   src/data/taxonomy.js   TAXONOMY (6 domains → topics), ASSET_TYPES, buildTree()
   src/data/chats.js      Seed chats + suggestion prompts
-  src/pages/*, src/components/*  UI
+  src/pages/*, src/components/*  UI (incl. src/pages/Insights.jsx — Data Insights, src/components/WeighPanel.jsx — cross-domain Weigh)
   src/pages/MeetingRecorder.jsx + src/hooks/useMeetingRecorder.js, useSpeechRecognition.js, useMicAnalyser.js
                       Meeting Recorder (live transcript via browser Web Speech API, inline editing, recent meetings)
   src/lib/meetingsService.js, src/lib/supabase.js
                       Meetings: browser → Supabase Edge Function `meetings` (Claude insights + save)
   supabase/migrations/  ALL database schema (SQL). Every schema change = a new timestamped .sql file here
   supabase/functions/   Supabase Edge Functions (TypeScript/Deno) — currently `meetings`
-/backend              Python FastAPI "AI service" (TO BUILD): LiteLLM, LlamaIndex, routing, extraction, governance
+/backend              Python FastAPI "AI service" (DONE — built and deployed on Cloud Run):
+  app/llm/            Provider gateway (Claude, GPT, Gemini, Grok, Hunyuan, DeepSeek)
+  app/retrieval/      Expertise matching (vector + keyword retrieval over approved records)
+  app/capture/        LLM extraction pass → draft Expertise / revision proposals
+  app/weigh/          Cross-domain / same-domain Expertise weighing (engine, schemas, select)
+  app/insights/       Adaptive CSV/XLSX analysis (long / wide / snapshot shape detection) + report rendering
+  app/routers/        chat, chats, expertise, proposals, weigh, insights, capture, files, audit, writing, health
+  app/db.py, app/models.py  SQLAlchemy models, Postgres (Supabase) session
+  scripts/            One-off DB migration/patch scripts (run manually against the live DB — not part of the deployed app)
 /docs                 This file + build prompts
 ```
+
+Live URLs: frontend `https://fractal-delta.vercel.app`, backend `https://fractal-backend-422044745328.asia-southeast1.run.app` (health at `/api/health`).
 
 ## Architecture (decided)
 ```

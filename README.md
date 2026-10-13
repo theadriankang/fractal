@@ -6,7 +6,10 @@ Fractal is a multi-model AI chat platform (Claude, GPT, Gemini, Grok, Tencent Hu
 
 Built for the **Tencent Cloud AI CAN DO IT Hackathon 2026 — Real Estate Track (Keppel): "AI HARVEST"**, where Expertise = Keppel's *Intelligence Pills*.
 
-> Status: **front-end prototype**. All model calls are mocked (placeholder streaming responses). See [Backend contract](#backend-contract) for what the API needs to provide.
+> Status: **live, deployed**. Frontend on Vercel, backend on Cloud Run — real model calls (Claude, GPT, Gemini, Grok, Hunyuan, DeepSeek), real retrieval-backed Expertise matching, and a Postgres-backed (Supabase) store. See [Architecture](#architecture) for the real API.
+>
+> - Frontend: https://fractal-delta.vercel.app
+> - Backend: https://fractal-backend-422044745328.asia-southeast1.run.app (health check at `/api/health`)
 
 ---
 
@@ -18,7 +21,7 @@ npm run dev        # http://localhost:5173
 npm run build      # production build → dist/
 ```
 
-Requires Node 18+. Data persists in your browser (localStorage). **User menu → Reset demo data** restores the seed data.
+Requires Node 18+. By default the frontend talks to the live backend (set `VITE_API_BASE` in `.env` to point at a local or deployed instance; `VITE_USE_MOCK=true` switches to an on-stage, localStorage-only fallback with no backend required). Data lives in Postgres (Supabase) via the backend. **User menu → Reset demo data** restores the seed data.
 
 The demo includes **55 fictional Expertise records** across all 6 domains, 19 topics
 and 4 asset types, plus **5 revision proposals**. Reloading an existing v2 demo adds
@@ -105,31 +108,50 @@ src/
   App.jsx                  routes + theme + toast
   store.js                 Zustand store: chats, expertise, proposals, settings, all actions
   data/
-    models.js              providers, models, Auto router (mock)
+    models.js              providers, models, Auto router
     expertise.js           seed Expertise (Keppel domains), statuses
     chats.js               seed chats + suggestion prompts
   lib/
-    mockApi.js             ← the ONLY place to swap for real API calls
+    api.js                 live backend client (streaming chat, Expertise match/detect, Weigh, insights, file uploads)
+    mockApi.js              on-stage fallback only (VITE_USE_MOCK=true) — no backend required
   components/
     Sidebar.jsx  TopBar.jsx  ModelSelector.jsx  Composer.jsx  Message.jsx  SettingsModal.jsx  ui.jsx
   pages/
-    ChatPage.jsx  ExpertiseLibrary.jsx  ExpertiseDetail.jsx  ReviewQueue.jsx
+    ChatPage.jsx  ExpertiseLibrary.jsx  ExpertiseDetail.jsx  ReviewQueue.jsx  Insights.jsx
+
+backend/
+  app/
+    main.py                 FastAPI app, CORS, router registration
+    db.py  models.py         SQLAlchemy models, Postgres (Supabase) session
+    seed.py  seed_data.json  demo fixture loader (seed_data.json is local-only, gitignored)
+    llm/                     provider gateway (Claude, GPT, Gemini, Grok, Hunyuan, DeepSeek)
+    retrieval/               Expertise matching (vector + keyword retrieval over approved records)
+    capture/                 LLM extraction pass → draft Expertise / revision proposals
+    weigh/                   cross-domain / same-domain Expertise weighing (engine, schemas, select)
+    insights/                adaptive CSV/XLSX analysis (long / wide / snapshot shape detection) + report rendering
+    routers/                 chat, chats, expertise, proposals, weigh, insights, capture, files, audit, writing, health
+  scripts/                   one-off DB migration/patch scripts (run manually against the live DB)
 ```
 
-## Backend contract
+## Architecture
 
-`src/lib/mockApi.js` mocks these. Replace each with a `fetch` to the backend (suggested: FastAPI + LlamaIndex + a provider gateway such as LiteLLM, hosted on Tencent Cloud):
+The frontend (`src/lib/api.js`) talks to the deployed FastAPI backend over `VITE_API_BASE`:
 
-| Function | Suggested endpoint | Purpose |
+| Area | Endpoint(s) | Purpose |
 |---|---|---|
-| `routeAuto(prompt)` | `POST /api/route` | Classify prompt → `{ modelId, category, reason }` |
-| `matchExpertise(prompt, …)` | `POST /api/expertise/match` | Retrieve relevant **approved** Expertise (LlamaIndex vector + keyword retrieval) |
-| `buildReply` + `streamText` | `POST /api/chat/completions` (SSE) | Stream tokens from the chosen provider, with Expertise injected into the system prompt |
-| `detectExpertise(prompt, chat, matched)` | `POST /api/expertise/detect` | LLM extraction pass → draft Expertise or revision proposal |
-| store CRUD actions | `/api/expertise`, `/api/proposals` | Persist Expertise, versions (snapshots), proposals, feedback; enforce roles server-side |
+| Chat | `POST /api/chat/completions` (SSE) | Streams tokens from the chosen provider (Claude, GPT, Gemini, Grok, Hunyuan, DeepSeek), with matched Expertise injected into the system prompt |
+| Expertise matching | `POST /api/expertise/match` | Retrieves relevant **approved** Expertise for a prompt (vector + keyword retrieval) |
+| Expertise capture | `POST /api/expertise/detect` | LLM extraction pass over a chat → draft Expertise or revision proposal |
+| Expertise CRUD | `/api/expertise`, `/api/proposals` | Persists Expertise, versions (snapshots), proposals, feedback; roles enforced server-side |
+| Cross-domain weighing | `POST /api/expertise/weigh` | When a question spans domains or experts conflict, surfaces each domain's view, the conflict, deciding factor, and suggestions |
+| Data Insights | `/api/insights/...` | Upload a CSV/XLSX (any shape — long, wide, or point-in-time snapshot), auto-detect metric/category/period columns, flag outliers, render a chart + narrative |
+| File uploads (chat) | `/api/files/...` | Accepts PDF, DOCX, XLSX, TXT, MD, CSV, and images as chat attachments |
+| Health | `GET /api/health` | Liveness check |
 
-The Expertise object shape is defined in `src/data/expertise.js`.
+The Expertise object shape is defined in `src/data/expertise.js`; the live schema is in `backend/app/models.py`.
+
+Deployed infrastructure: frontend on **Vercel**, backend on **Google Cloud Run** (`asia-southeast1`), database on **Supabase** (Postgres).
 
 ## Hackathon notes
-- The project must be built with **CodeBuddy or WorkBuddy**, with at least 3 chat-log screenshots as proof — do the backend work in CodeBuddy and capture those screenshots as you go.
+- The project must be built with **CodeBuddy or WorkBuddy**, with at least 3 chat-log screenshots (or API logs / a written description) as proof of usage — required for scoring regardless of how complete the project is.
 - Submission deadline: **16 Oct 2026**.
