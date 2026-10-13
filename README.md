@@ -45,7 +45,7 @@ retrieval and preservation of saved state during the demo upgrade.
 ### Chat (Open WebUI-style)
 - **Model picker** — choose a specific model per provider, or **Auto** (recommended): Fractal classifies the prompt and routes it to the best model (coding → Claude Sonnet, live news → Grok, long docs → Gemini Pro, Chinese → Hunyuan…). The composer previews the route live as you type; each answer shows a badge for the chosen model and the reason.
 - **Compare** — the **+** next to the model picker adds up to 3 models side by side.
-- **Weigh domains** — toggle in the composer. Instead of one answer, Fractal seats one approved Expertise per relevant domain and shows each expert's view, where they agree, where one domain's idea runs into another's rule (quoting that rule), and suggested next steps that still show what every expert thinks of them. Backend: `POST /api/expertise/weigh` (`backend/app/weigh/`).
+- **Experts weighed together** — appears under an answer on its own, only when needed: the question names two areas or a trade-off ("…without upsetting tenants", "even though…"), or the experts behind it actually conflict. It shows each expert's view, where they agree, where one expert's idea runs into another's rule (quoting that rule, with the deciding factor), and suggestions that still show what every expert thinks of them. Backend: `POST /api/expertise/weigh` with `auto: true` (`backend/app/weigh/`).
 - **Expertise applied** chips under every answer show which Expertise (and which version) grounded it — click through to the source.
 - **`#` in the composer** attaches a specific approved Expertise manually.
 - Attach files, copy, regenerate, 👍/👎.
@@ -94,7 +94,7 @@ Check the frontend service with `npm run test:writing`. Run backend checks from
 6. **Review Queue** → switch role to Contributor (approve is blocked) → switch to Reviewer → **Approve** → v1.0 is live → *human-supervised, governed*.
 7. Back in chat, 👎 an answer with a correction → it appears as a **proposed revision** → *learns through governed feedback*.
 8. **Compare** Claude vs GPT vs Hunyuan on the same prompt — same Expertise, any model → *portable*.
-9. **New chat → "Weigh a plan across domains"** (pre-cool Tower A vs. the Level 23 tenant who keeps complaining) → Energy, Tenant Experience and Technical Services each give their view, the panel flags the blocker and how to reconcile it, and lists who to loop in → *coordinates across domains, humans decide*.
+9. Ask *"Should we pre-cool Tower A from 7:00 on Mondays to cut the peak demand charge, even though the Level 23 tenant keeps complaining it's too warm?"* → under the answer, **Experts weighed together** shows Energy, Tenant Experience and Technical Services, the conflict, how to reconcile it, and who to loop in → *coordinates across domains, humans decide*. A plain question ("How do I triage a chiller alarm?") gets no weighing.
 
 ---
 

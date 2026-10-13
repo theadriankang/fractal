@@ -10,7 +10,6 @@ import { useStore } from '../store'
 import { ModelBadge } from './ModelSelector'
 import CaptureCard from './CaptureCard'
 import WeighPanel from './WeighPanel'
-import { isWeigh } from '../lib/weigh'
 import { contributeBlock } from '../lib/permissions'
 import { TAXONOMY } from '../data/taxonomy'
 
@@ -107,24 +106,8 @@ const markdownComponents = {
   },
 }
 
-function WeighBadge({ response }) {
-  const experts = response.auto?.weigh?.experts || []
-  const n = experts.length
-  const d = new Set(experts.map((x) => x.domain)).size
-  return (
-    <div className="flex items-center gap-2">
-      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-accent-500/15 text-accent-600 dark:text-accent-400"><Scale size={13} /></span>
-      <span className="text-sm font-semibold">Fractal · Weighed across domains</span>
-      {!response.streaming && n > 0 && (
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">{d === n ? `${d} ${d === 1 ? 'domain' : 'domains'}` : `${n} experts · ${d} ${d === 1 ? 'domain' : 'domains'}`}</span>
-      )}
-    </div>
-  )
-}
-
 function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
   const r = msg.responses[idx]
-  const weigh = isWeigh(r)
   const { regenerate, rateResponse, user, expertise } = useStore()
   const usedDomain = expertise.find((e) => e.id === r.expertise?.[0]?.id)?.domain
   // Corrections become proposals, so they follow the contribution rule; anyone can still rate.
@@ -141,15 +124,8 @@ function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
 
   return (
     <div className={`min-w-0 ${compare ? 'rounded-2xl p-4 ring-1 ring-gray-200 dark:ring-gray-800' : ''}`}>
-      {weigh ? <WeighBadge response={r} /> : <ModelBadge response={r} />}
-      {weigh && r.streaming && (
-        <p className="mt-3 flex items-center gap-2 text-sm text-gray-500">
-          <span className="flex gap-1">{[0, 1, 2].map((i) => <span key={i} className="h-2 w-2 animate-pulse rounded-full bg-gray-400" style={{ animationDelay: `${i * 150}ms` }} />)}</span>
-          Finding each domain’s expert and weighing their views…
-        </p>
-      )}
-      {weigh && !r.streaming && r.auto?.weigh && <WeighPanel result={r.auto.weigh} />}
-      {!weigh && <div className="prose prose-sm mt-2 max-w-none dark:prose-invert prose-p:leading-relaxed prose-li:my-0.5 sm:prose-base sm:text-[15px]">
+      <ModelBadge response={r} />
+      <div className="prose prose-sm mt-2 max-w-none dark:prose-invert prose-p:leading-relaxed prose-li:my-0.5 sm:prose-base sm:text-[15px]">
         {r.content ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{r.content}</ReactMarkdown>
         ) : r.error ? null : (
@@ -158,12 +134,12 @@ function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
           </div>
         )}
         {r.streaming && r.content && <span className="ml-0.5 inline-block h-4 w-2 translate-y-0.5 animate-blink bg-gray-400" />}
-      </div>}
+      </div>
       {r.error && <p className="mt-2 text-sm text-red-500">{r.error}</p>}
 
       {!r.streaming && (
         <>
-          {!weigh && <ExpertiseUsed refs={r.expertise} domainsCoordinated={r.domainsCoordinated} />}
+          <ExpertiseUsed refs={r.expertise} domainsCoordinated={r.domainsCoordinated} />
           <div className="mt-2 flex items-center gap-0.5 text-gray-500">
             <button className="icon-btn" onClick={copy} title="Copy">{copied ? <Check size={15} /> : <Copy size={15} />}</button>
             {!readOnly && <button className="icon-btn" onClick={() => regenerate(chatId, msg.id, idx)} title="Regenerate"><RefreshCw size={15} /></button>}
@@ -227,6 +203,35 @@ function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
 }
 
 
+// Shown under an answer only when weighing came into play for it (see checkForConflict in store.js):
+// the question asked about two areas or a trade-off, or the experts behind it conflict.
+function WeighedSection({ msg }) {
+  const result = msg.responses.find((r) => r.auto?.weigh)?.auto.weigh
+  if (msg.weighCheck === 'checking' && !result) {
+    return (
+      <p className="mt-3 flex items-center gap-1.5 text-xs text-gray-500 animate-fadeIn">
+        <Scale size={12} className="animate-pulse text-accent-500" /> Checking whether the experts agree…
+      </p>
+    )
+  }
+  if (!result) return null
+  const experts = result.experts || []
+  const domains = new Set(experts.map((x) => x.domain)).size
+  return (
+    <div className="mt-4 rounded-2xl p-4 ring-1 ring-accent-500/30 animate-fadeIn">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-accent-500/15 text-accent-600 dark:text-accent-400"><Scale size={13} /></span>
+        <span className="text-sm font-semibold">Experts weighed together</span>
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+          {domains === experts.length ? `${domains} domains` : `${experts.length} experts · ${domains} domains`}
+        </span>
+      </div>
+      {result.trigger && <p className="mt-1 text-xs text-gray-500">{result.trigger}</p>}
+      <WeighPanel result={result} />
+    </div>
+  )
+}
+
 export function AssistantMessage({ chatId, msg, readOnly = false }) {
   const compare = msg.responses.length > 1
   return (
@@ -234,6 +239,7 @@ export function AssistantMessage({ chatId, msg, readOnly = false }) {
       <div className={compare ? `grid gap-3 ${msg.responses.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'}` : ''}>
         {msg.responses.map((_, i) => <ResponseCard key={i} chatId={chatId} msg={msg} idx={i} compare={compare} readOnly={readOnly} />)}
       </div>
+      <WeighedSection msg={msg} />
       {!readOnly && <CaptureCard key={msg.detection ? 'detected' : 'none'} chatId={chatId} msg={msg} />}
     </div>
   )

@@ -21,6 +21,9 @@ class WeighRequest(BaseModel):
     attachedIds: list[str] = Field(default=[], max_length=10)
     # Earlier turns of the chat, so a follow-up ("what if we only do it on Mondays?") keeps its meaning.
     context: list[ContextTurn] = Field(default=[], max_length=6)
+    # auto = sent alongside every chat question: weighing only "comes into play" (triggered=true) when
+    # the question asks about two areas together, or when the experts behind it actually conflict.
+    auto: bool = False
 
 
 class Expert(BaseModel):
@@ -90,6 +93,9 @@ class Escalation(BaseModel):
 
 class WeighResult(BaseModel):
     question: str
+    # Whether weighing came into play for this question, and why (always true unless auto=true).
+    triggered: bool = True
+    trigger: str = ""
     mode: Literal["model", "rules", "none"]
     model: Optional[str] = None
     summary: str = ""

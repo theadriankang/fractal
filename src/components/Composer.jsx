@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, Plus, BookOpenCheck, Mic, X, FileText, Sparkles, Hash, Loader2, AlertCircle, Scale } from 'lucide-react'
+import { ArrowUp, Square, Plus, BookOpenCheck, Mic, X, FileText, Sparkles, Hash, Loader2, AlertCircle } from 'lucide-react'
 import { useStore } from '../store'
 import { USE_MOCK, FILE_ACCEPT, MAX_FILES, checkFile, uploadFile } from '../lib/api'
 import { routeAuto, getModel } from '../data/models'
@@ -15,8 +15,6 @@ export default function Composer({
   const [attached, setAttached] = useState(initialAttached)
   const [picker, setPicker] = useState(null) // null | { query }
   const [pickIdx, setPickIdx] = useState(0)
-  // "Weigh domains" mode stays on between messages, so follow-up questions are weighed too.
-  const [weigh, setWeigh] = useState(false)
   const ta = useRef(null)
   const fileRef = useRef(null)
 
@@ -71,7 +69,7 @@ export default function Composer({
 
   const send = () => {
     if (!text.trim() || streaming || uploading || failed) return
-    onSend(text.trim(), { attachedExpertise: attached, files: files.map(({ id, name, size, kind }) => ({ id, name, size, kind })), ...(weigh ? { weigh: true } : {}) })
+    onSend(text.trim(), { attachedExpertise: attached, files: files.map(({ id, name, size, kind }) => ({ id, name, size, kind })) })
     setText(''); setFiles([]); setAttached([])
   }
 
@@ -85,7 +83,7 @@ export default function Composer({
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
-  const route = showRouting && !weigh && selectedModels.length === 1 && selectedModels[0] === 'auto' && text.trim().length > 6 ? routeAuto(text) : null
+  const route = showRouting && selectedModels.length === 1 && selectedModels[0] === 'auto' && text.trim().length > 6 ? routeAuto(text) : null
   const routed = route && getModel(route.modelId)
 
   return (
@@ -140,7 +138,7 @@ export default function Composer({
           value={text}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={weigh ? 'Describe a plan or an issue — Fractal weighs every relevant domain’s Expertise together' : placeholder}
+          placeholder={placeholder}
           className="w-full resize-none bg-transparent px-2 text-[15px] leading-6 outline-none placeholder:text-gray-400"
         />
 
@@ -160,16 +158,6 @@ export default function Composer({
             onClick={() => { onChange(text + (text && !text.endsWith(' ') ? ' #' : '#')); ta.current.focus() }}
           >
             <BookOpenCheck size={14} /> Expertise
-          </button>
-          )}
-          {allowExpertise && (
-          <button
-            className={`btn rounded-full px-2.5 py-1 text-xs ${weigh ? 'bg-accent-500/10 text-accent-600 ring-1 ring-accent-500/30 dark:text-accent-400' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-            aria-pressed={weigh}
-            onClick={() => setWeigh((w) => !w)}
-            title="Weigh every relevant domain’s Expertise together: where the experts agree, where one domain’s idea may not hold because of another’s rule, and what each expert thinks of the suggestions"
-          >
-            <Scale size={14} /> Weigh domains
           </button>
           )}
 

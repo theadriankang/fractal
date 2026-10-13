@@ -7,7 +7,6 @@ import { migrateDemoState } from './data/demoMigration'
 import { PROVIDERS, routeAuto, routeAutoWithFallback, makeAvailabilityChecker, getModel } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
 import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend, routeAutoBackend, refreshLiveModels, getModelAvailability, weighExpertise } from './lib/api'
-import { WEIGH_ID, isWeigh } from './lib/weigh'
 import { DEMO_USERS, signIn, userById } from './data/users'
 import { supabase, hasSupabase } from './lib/supabase'
 import { canContribute, contributeBlock, isContributor, reviewBlock, canGovern, seesQueue, canEdit, deleteBlock } from './lib/permissions'
@@ -191,49 +190,28 @@ function streamResponse(get, chatId, msgId, idx, { prompt, matched, onFinish }) 
   }
 }
 
-// "Weigh across domains": asks the backend to weigh every relevant domain's Expertise against the
-// question and stores the result in response `idx`. Not a model stream: one request, one result.
-// Returns a cancel function, like streamResponse.
-function weighResponse(get, set, chatId, msgId, idx, { question, attachedIds = [], onFinish }) {
-  const patch = (fn) =>
-    get().patchMessage(chatId, msgId, (m) => ({ ...m, responses: m.responses.map((x, i) => (i === idx ? fn(x) : x)) }))
+// Automatic weighing. Alongside every answer, ask the backend whether this question needs the
+// experts weighed together: it does when the question names two areas or a trade-off, or when the
+// experts behind it actually conflict. Only then is the result kept, on the first response's `auto`
+// JSON (saved with the chat, no schema change), and shown under the answer. Failures stay silent:
+// the answer itself is unaffected.
+function checkForConflict(get, chatId, msgId, question, attachedIds) {
+  const patchMsg = (fn) => get().patchMessage(chatId, msgId, fn)
   const chat = get().chats.find((c) => c.id === chatId)
-  // Earlier turns (minus the question itself) so a follow-up like "what if only on Mondays?" keeps its meaning.
-  const context = historyBefore(chat, msgId, WEIGH_ID).slice(0, -1).slice(-6).map(({ role, content }) => ({ role, content: content.slice(0, 4000) }))
-  let ended = false
-  const end = () => {
-    if (ended) return false
-    ended = true
-    return true
-  }
-  weighExpertise({ question, attachedIds, context })
+  const context = historyBefore(chat, msgId, null).slice(0, -1).slice(-6).map(({ role, content }) => ({ role, content: content.slice(0, 4000) }))
+  patchMsg((m) => ({ ...m, weighCheck: 'checking' }))
+  weighExpertise({ question, attachedIds, context, auto: true })
     .then((result) => {
-      if (!end()) return
-      patch((x) => ({
-        ...x,
-        content: result.markdown,
-        streaming: false,
-        error: undefined,
-        auto: { category: 'Cross-domain weighing', reason: result.summary, weigh: result },
-        expertise: result.experts.map((e) => ({ id: e.id, version: e.version })),
+      if (!result.triggered) return patchMsg((m) => ({ ...m, weighCheck: null }))
+      patchMsg((m) => ({
+        ...m,
+        weighCheck: null,
+        responses: m.responses.map((r, i) => (i === 0 ? { ...r, auto: { ...(r.auto || {}), weigh: result } } : r)),
       }))
-      const ids = result.experts.map((e) => e.id)
-      if (ids.length) {
-        set((s) => ({ expertise: s.expertise.map((e) => (ids.includes(e.id) ? { ...e, usageCount: e.usageCount + 1 } : e)) }))
-        sync(get, 'usage counts', (api) => api.recordUsage(ids))
-      }
-      onFinish?.()
+      // If the answer already finished (and was saved), save again so the weighing is kept.
+      if (!streams.has(msgId)) saveMessage(get, chatId, msgId)
     })
-    .catch((e) => {
-      if (!end()) return
-      patch((x) => ({ ...x, streaming: false, error: e.message }))
-      onFinish?.()
-    })
-  return () => {
-    if (!end()) return
-    patch((x) => ({ ...x, streaming: false, error: 'Stopped before the domains were weighed.' }))
-    onFinish?.()
-  }
+    .catch(() => patchMsg((m) => ({ ...m, weighCheck: null })))
 }
 
 const defaultConnections = Object.fromEntries(
@@ -475,38 +453,12 @@ export const useStore = create(
       patchMessage: (chatId, msgId, fn) =>
         get().patchChat(chatId, (c) => ({ ...c, messages: c.messages.map((m) => (m.id === msgId ? fn(m) : m)) })),
 
-      sendMessage: async (chatId, text, { attachedExpertise = [], files = [], webSearch = false, weigh = false } = {}) => {
+      sendMessage: async (chatId, text, { attachedExpertise = [], files = [], webSearch = false } = {}) => {
         const { settings, expertise, selectedModels } = get()
         const enabledModels = selectedModels
         // The answer is stamped 1 ms after the question so the saved order is stable.
         const sentAt = Date.now()
         const userMsg = { id: uid('m'), role: 'user', content: text, files, attachedExpertise, webSearch, createdAt: new Date(sentAt).toISOString() }
-
-        // Weigh across domains: the backend picks one expert per relevant domain and weighs them
-        // together, so model choice, retrieval and Auto routing are skipped here.
-        if (weigh) {
-          const asstMsg = {
-            id: uid('m'), role: 'assistant', createdAt: new Date(sentAt + 1).toISOString(),
-            responses: [{ id: uid('r'), modelId: WEIGH_ID, auto: null, expertise: [], content: '', streaming: true, rating: null }],
-          }
-          get().patchChat(chatId, (c) => ({
-            ...c,
-            title: c.messages.length === 0 ? suggestTitle(text) : c.title,
-            updatedAt: now(),
-            messages: [...c.messages, userMsg, asstMsg],
-          }))
-          saveChat(get, chatId)
-          saveMessage(get, chatId, userMsg.id)
-          const onFinish = () => {
-            streams.delete(asstMsg.id)
-            saveMessage(get, chatId, asstMsg.id)
-            const refs = get().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === asstMsg.id)?.responses[0]?.expertise || []
-            const weighed = get().expertise.filter((e) => refs.some((r) => r.id === e.id))
-            if (get().settings.autoDetect) get().runCapture(chatId, asstMsg.id, text, weighed)
-          }
-          streams.set(asstMsg.id, [weighResponse(get, set, chatId, asstMsg.id, 0, { question: text, attachedIds: attachedExpertise, onFinish })])
-          return
-        }
 
         // Semantic Expertise retrieval via backend.
         // autoApply off → only use attached Expertise, skip the match call.
@@ -589,6 +541,8 @@ export const useStore = create(
         }
         const cancels = responses.map((_, idx) => streamResponse(get, chatId, asstMsg.id, idx, { prompt: text, matched, onFinish }))
         streams.set(asstMsg.id, cancels)
+        // Runs beside the answer: weighing only appears if this question needs it.
+        if (settings.autoApply) checkForConflict(get, chatId, asstMsg.id, text, attachedExpertise)
       },
 
       stopGeneration: (chatId) => {
@@ -606,12 +560,6 @@ export const useStore = create(
           ...m,
           responses: m.responses.map((x, k) => (k === idx ? { ...x, id: uid('r'), rid: undefined, content: '', streaming: true, rating: null, error: undefined } : x)),
         }))
-        if (isWeigh(r)) {
-          const attachedIds = chat.messages[i - 1]?.attachedExpertise || []
-          const cancel = weighResponse(get, set, chatId, msgId, idx, { question: prompt, attachedIds, onFinish: () => saveMessage(get, chatId, msgId) })
-          streams.set(msgId, [...(streams.get(msgId) || []), cancel])
-          return
-        }
         const cancel = streamResponse(get, chatId, msgId, idx, { prompt, matched, onFinish: () => saveMessage(get, chatId, msgId) })
         streams.set(msgId, [...(streams.get(msgId) || []), cancel])
       },
@@ -696,7 +644,7 @@ export const useStore = create(
           return
         }
         const keyword = () => fromKeywordDetector(detectExpertise(text, chat, matched), user, get().expertise)
-        const live = msg.responses.some((r) => (isLive(r.modelId) || isWeigh(r)) && r.content && !r.error)
+        const live = msg.responses.some((r) => isLive(r.modelId) && r.content && !r.error)
         let det = null
         if (!live) det = keyword()
         else if (text.trim().split(/\s+/).length >= CAPTURE_MIN_WORDS) {

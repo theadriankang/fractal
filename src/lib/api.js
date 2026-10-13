@@ -168,14 +168,14 @@ export async function matchExpertiseBackend(query, attachedIds = [], limit = 3) 
  * rule, and suggestions that still show what each expert thinks. Throws with a readable message.
  * `context` is the earlier chat as [{role, content}] so follow-up questions keep their meaning.
  */
-export async function weighExpertise({ question, attachedIds = [], context = [] }) {
+export async function weighExpertise({ question, attachedIds = [], context = [], auto = false }) {
   if (USE_MOCK) throw new Error('Weighing across domains needs the Fractal backend (mock mode is on).')
   let res
   try {
     res = await apiFetch('/api/expertise/weigh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, attachedIds, context }),
+      body: JSON.stringify({ question, attachedIds, context, auto }),
     })
   } catch {
     throw new Error('The Fractal backend is offline, so the domains could not be weighed. Try again in a moment.')

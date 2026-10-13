@@ -453,6 +453,61 @@ async def weigh(question: str, picked: Picked, context: list[ContextTurn] | None
     return assemble(question, picked, parts, mode="model", model=settings.weigh_model, dropped=dropped)
 
 
+# ---------------------------------------------------------------- automatic mode: should weighing come into play?
+
+# Words people use for each domain in a question (domain names alone are too formal to rely on).
+DOMAIN_WORDS = {
+    "Technical Services": r"technical services|engineering|engineer|maintenance|m&e",
+    "Energy Optimisation": r"energy|electricity|demand charge|peak demand|kw/rt",
+    "Asset Operations": r"asset operations|asset manager|capex|opex|budget|vendor",
+    "Tenant Experience": r"tenant experience|tenants?\b|occupants?\b|comfort",
+    "Leasing": r"leasing|lease|renewal|rent\b",
+    "Sustainability": r"sustainab|carbon|emission|green mark|esg",
+}
+TRADE_OFF = re.compile(
+    r"\b(weigh|trade[- ]?offs?|conflicts?|clash(es)?|versus|vs\.?|balance|at odds|competing|pull against|"
+    r"even though|without (hurting|affecting|compromising|upsetting))\b", re.I)
+
+
+def explicit_request(question: str, picked: Picked) -> str:
+    """Why the question itself asks for weighing (empty if it doesn't): it names two areas, or a trade-off."""
+    q = question.lower()
+    named = [d for d, pattern in DOMAIN_WORDS.items() if re.search(pattern, q)]
+    if len(named) >= 2:
+        return f"Your question involves {' and '.join(named[:3])}, so their experts were weighed together."
+    m = TRADE_OFF.search(question)
+    if m and len(picked) >= 2:
+        return f"Your question asks about a trade-off (\"{m.group(0)}\"), so the experts involved were weighed together."
+    return ""
+
+
+def _not_triggered(question: str, picked: Picked, why: str) -> WeighResult:
+    return WeighResult(question=question, mode="none", triggered=False, summary=why, experts=[x for x, _ in picked])
+
+
+async def weigh_auto(question: str, picked: Picked, context: list[ContextTurn] | None = None, client=None,
+                     check_implicit: bool = True) -> WeighResult:
+    """Chat's automatic mode. Weighing comes into play only when (a) the question asks about two areas or a
+    trade-off, or (b) the experts behind it really conflict, i.e. the checked weighing found a tension.
+    Quick (no-model) mode only handles (a): its text-matched conflicts are too rough to interrupt a chat."""
+    if len(picked) < 2:
+        return _not_triggered(question, picked, "Fewer than two experts apply, so there is nothing to weigh.")
+    reason = explicit_request(question, picked)
+    if not reason and (client is None or not check_implicit):
+        return _not_triggered(question, picked, "The question doesn't ask for a trade-off.")
+    result = await weigh(question, picked, context, client)
+    if reason:
+        result.trigger = reason
+        return result
+    if result.mode == "model" and result.tensions:
+        name = {x.id: x.name for x in result.experts}
+        t = result.tensions[0]
+        result.trigger = (f"{name.get(t.ideaFrom, t.ideaFrom)} and {name.get(t.constraintFrom, t.constraintFrom)} "
+                          f"pull in different directions here, so the experts were weighed together.")
+        return result
+    return _not_triggered(question, picked, "The experts involved agree; no conflict to weigh.")
+
+
 # ---------------------------------------------------------------- plain-text form (chat history, copy button)
 
 def _count(experts: list[Expert]) -> str:

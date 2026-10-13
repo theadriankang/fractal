@@ -15,7 +15,7 @@ from app.main import app
 from app.models import Expertise
 from app.retrieval import index
 from app.weigh import engine, select
-from app.weigh.engine import assemble, handoff_gaps, rules_weigh, validate, weigh
+from app.weigh.engine import assemble, explicit_request, handoff_gaps, rules_weigh, validate, weigh, weigh_auto
 from app.weigh.select import select_experts
 
 # Trimmed copies of the seed Expertise in src/data/expertise.js.
@@ -286,4 +286,69 @@ def test_same_domain_tension_keeps_its_deciding_factor(db):
     assert dropped == 0 and t.decidingFactor.startswith("Net saving")
     md = engine.to_markdown(assemble("q", picked, parts, mode="model"))
     assert "Energy Optimisation (Peak Demand Shaving)" in md and "Deciding factor: Net saving" in md
+
+
+# ---------------------------------------------------------------- automatic mode (chat): when does weighing come into play?
+
+def auto(*a, **kw):
+    return asyncio.run(weigh_auto(*a, **kw))
+
+
+NO_CONFLICT = {**RAW, "tensions": []}
+
+
+def test_explicit_request_by_two_areas_or_a_trade_off():
+    two = [1, 2]
+    assert "Energy Optimisation and Tenant Experience" in explicit_request("Can we cut the energy bill without the tenants noticing?", two)
+    assert "even though" in explicit_request("Pre-cool at 7:00 even though load is low?", two)
+    assert explicit_request("How do I triage a chiller alarm?", two) == ""
+    assert explicit_request("Pre-cool at 7:00 even though load is low?", [1]) == ""  # one expert: nothing to weigh
+
+
+def test_auto_comes_into_play_only_on_request_or_real_conflict(db):
+    picked = picked_for(db, ["exp-energy-peak", "exp-chiller-fault", "exp-tenant-complaint"])
+    plain = "How should we handle the Monday start-up?"
+    # Nothing asked, experts agree → stays out of the way, no model claims shown.
+    quiet = auto(plain, picked, client=StubClient(NO_CONFLICT))
+    assert not quiet.triggered and quiet.mode == "none" and not quiet.tensions
+    # Nothing asked, but the checked weighing found a conflict → comes into play and says why.
+    conflict = auto(plain, picked, client=StubClient(RAW))
+    assert conflict.triggered and conflict.tensions and "pull in different directions" in conflict.trigger
+    # Asked about a trade-off → comes into play even without a conflict.
+    asked = auto("Should we pre-cool even though it costs comfort?", picked, client=StubClient(NO_CONFLICT))
+    assert asked.triggered and "trade-off" in asked.trigger
+
+
+def test_auto_without_a_model_only_answers_explicit_requests(db):
+    picked = picked_for(db, ["exp-energy-peak", "exp-tenant-complaint"])
+    assert not auto("How should we handle the Monday start-up?", picked).triggered
+    r = auto("Can we cut energy use without upsetting tenants?", picked)
+    assert r.triggered and r.mode == "rules"
+
+
+def test_auto_skips_the_model_when_fewer_than_two_experts_or_checks_are_off(db):
+    stub = StubClient(RAW)
+    assert not auto("Pre-cool even though load is low?", picked_for(db, ["exp-energy-peak"]), client=stub).triggered
+    two = picked_for(db, ["exp-energy-peak", "exp-tenant-complaint"])
+    assert not auto("How should we handle the Monday start-up?", two, client=stub, check_implicit=False).triggered
+    assert stub.calls == 0
+
+
+def test_auto_endpoint_and_readable_database_error(db, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+    monkeypatch.setattr(index, "search", hits(("exp-energy-peak", 0.71)))
+    monkeypatch.setattr("app.routers.weigh.claude.is_configured", lambda: False)
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        client = TestClient(app)
+        body = client.post("/api/expertise/weigh", json={"question": "How do I read the BMS trend?", "auto": True}).json()
+        assert body["triggered"] is False and body["markdown"] == ""
+
+        def down(*a, **kw):
+            raise OperationalError("select 1", {}, Exception("connection refused"))
+        monkeypatch.setattr("app.routers.weigh.select_experts", down)
+        res = client.post("/api/expertise/weigh", json={"question": "anything", "auto": True})
+        assert res.status_code == 503 and "DATABASE_URL" in res.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
 
