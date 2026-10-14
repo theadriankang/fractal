@@ -460,6 +460,32 @@ export const useStore = create(
         const sentAt = Date.now()
         const userMsg = { id: uid('m'), role: 'user', content: text, files, attachedExpertise, webSearch, createdAt: new Date(sentAt).toISOString() }
 
+        // Placeholder assistant message — one placeholder response per enabled model,
+        // each pre-assigned its final id so later patches can target it directly.
+        // This goes into the chat BEFORE any async work (Expertise match, Smart Auto
+        // routing) so the user's prompt and a "thinking" indicator appear instantly,
+        // instead of the UI sitting on the empty/landing state for the round-trip.
+        const responsePlaceholders = enabledModels.map((mid) => ({
+          id: uid('r'),
+          modelId: mid === 'auto' ? null : mid,
+          auto: null,
+          expertise: [],
+          content: '',
+          streaming: true,
+          rating: null,
+        }))
+        const asstMsg = { id: uid('m'), role: 'assistant', createdAt: new Date(sentAt + 1).toISOString(), responses: responsePlaceholders }
+
+        get().patchChat(chatId, (c) => ({
+          ...c,
+          title: c.messages.length === 0 ? suggestTitle(text) : c.title,
+          updatedAt: now(),
+          messages: [...c.messages, userMsg, asstMsg],
+        }))
+
+        saveChat(get, chatId)
+        saveMessage(get, chatId, userMsg.id)
+
         // Semantic Expertise retrieval via backend.
         // autoApply off → only use attached Expertise, skip the match call.
         // Backend returns null on failure (offline/error/mock) → local fallback.
@@ -499,29 +525,20 @@ export const useStore = create(
         const autoRoute = needsAuto
           ? (await routeAutoBackend(text)) || routeAutoWithFallback(text, isAvailable)
           : null
-        const responses = enabledModels.map((mid) => {
+        const responses = enabledModels.map((mid, idx) => {
           const auto = mid === 'auto' ? autoRoute : null
           return {
-            id: uid('r'),
+            ...responsePlaceholders[idx],
             modelId: auto ? auto.modelId : mid,
             auto: auto ? { category: auto.category, reason: auto.reason } : null,
             expertise: matched.map((e) => ({ id: e.id, version: e.version })),
-            content: '',
-            streaming: true,
-            rating: null,
           }
         })
-        const asstMsg = { id: uid('m'), role: 'assistant', createdAt: new Date(sentAt + 1).toISOString(), responses }
 
-        get().patchChat(chatId, (c) => ({
-          ...c,
-          title: c.messages.length === 0 ? suggestTitle(text) : c.title,
-          updatedAt: now(),
-          messages: [...c.messages, userMsg, asstMsg],
-        }))
-
-        saveChat(get, chatId)
-        saveMessage(get, chatId, userMsg.id)
+        // Fill in the real per-response data (model, auto-route reason, matched
+        // Expertise) now that it's known, without touching the placeholders' ids
+        // or disturbing the "thinking" indicator already on screen.
+        get().patchMessage(chatId, asstMsg.id, (m) => ({ ...m, responses }))
 
         // bump usage counts
         if (matched.length) {
