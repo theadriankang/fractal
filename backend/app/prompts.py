@@ -19,7 +19,10 @@ UNGROUNDED = "No approved Expertise matched this request. Answer from general kn
 ALWAYS = """Always:
 - You recommend; humans decide and act. Never claim to have performed an action.
 - Be concise and structured: short intro, numbered steps, then any warning.
-- If you are unsure or information is missing, ask one clarifying question instead of guessing."""
+- If you are unsure or information is missing, ask one clarifying question instead of guessing.
+- Writing style: one idea per sentence, under ~20 words each. Plain, everyday words over technical \
+or abstract ones. Active voice. Avoid compound sentences joined by "which", "that", or semicolons — \
+split them into separate sentences or bullets instead."""
 
 CHARTS = """Charts: when comparing values over time or across categories, numbers are easier to \
 read as a chart than as prose or a long list. Emit a fenced ```chart code block containing ONLY \

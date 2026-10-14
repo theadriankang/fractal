@@ -72,6 +72,9 @@ alternative. If details are missing or sources conflict, identify them in
 missingInformation and use clear [placeholders] in the draft instead of guessing.
 Do not copy internal operational details into an external email unless appropriate
 for its stated audience. Never promise compensation or approval absent a reference.
+Writing style for "summary" and "email.body": one idea per sentence, under ~20 words
+each, plain everyday words, active voice. Split compound sentences joined by "which",
+"that", or semicolons into separate sentences.
 
 Return ONLY a JSON object with these exact keys:
 {"summary": "", "email": null, "citations": [{"expertiseId": "supplied id",
