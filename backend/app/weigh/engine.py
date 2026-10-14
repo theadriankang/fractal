@@ -125,7 +125,11 @@ Rules:
 - Use only the Expertise given and cite it by id. Do not invent thresholds, names, roles or procedures.
 - Anything from general knowledge must be a suggestion with general=true.
 - You suggest; humans decide. Never write as if an action was taken.
-- Plain, short sentences. No markdown.
+- Writing style — this is read on screen under time pressure, not as a report: one idea per sentence,
+  under ~20 words each. Plain, everyday words over technical or abstract ones. Active voice ("the
+  chiller trips" not "the chiller is tripped"). No markdown, no compound sentences joined by "which" or
+  semicolons — split them. Every "point"/headline is a single short claim a reader can act on, not a
+  topic label (write "float risks repeat complaints" not "complaint risk from the float").
 Always respond by calling the record_weighing tool."""
 
 # Limits on what is kept from the model.
