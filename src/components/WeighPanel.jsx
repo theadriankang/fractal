@@ -120,7 +120,7 @@ function ExpertCard({ x, p }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-start gap-2 p-3 text-left"
+        className="flex w-full items-start gap-2.5 p-3.5 text-left"
       >
         <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${meta?.dot || 'bg-gray-400'}`} />
         <span className="min-w-0 flex-1">
@@ -376,7 +376,7 @@ export default function WeighPanel({ result }) {
 
   const content = {
     experts: (
-      <div className={`grid gap-2 ${result.experts.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+      <div className={`grid gap-3 ${result.experts.length > 1 ? 'lg:grid-cols-2' : ''}`}>
         {result.experts.map((x) => <ExpertCard key={x.id} x={x} p={persp[x.id]} />)}
       </div>
     ),
@@ -424,26 +424,29 @@ export default function WeighPanel({ result }) {
   return (
     <SharedDomains.Provider value={shared}>
       <div className="mt-2 text-[15px]">
+        {/* One row, one job: who's in this weighing. The view toggle and the mode note each
+            get their own line below instead of all three competing for the same row — that
+            crowding (pills + toggle + a full-sentence badge, all wrapping together) was the
+            main source of clutter at the top of the panel. */}
         <div className="flex flex-wrap items-center gap-1.5">
           {result.experts.map((x) => <DomainPill key={x.id} expert={x} />)}
-          <div className="ml-auto flex items-center gap-1.5">
-            <ViewModeToggle mode={viewMode} onChange={setMode} />
-            <span
-              className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-              title={result.mode === 'model' ? `Weighed by Claude; every conflict was checked against the approved Expertise.` : result.note}
-            >
-              {result.mode === 'model' ? 'Weighed by Claude · checked against Expertise' : 'Quick mode · text matching'}
-            </span>
-          </div>
         </div>
 
-        <div className="mt-3 flex items-start gap-2 rounded-lg bg-accent-500/[0.06] px-3 py-2.5 dark:bg-accent-500/10">
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <p className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+            {result.mode === 'model' ? (
+              <>Weighed by Claude · checked against Expertise</>
+            ) : (
+              <><Info size={12} /> {result.note || 'Quick mode · text matching'}</>
+            )}
+          </p>
+          <ViewModeToggle mode={viewMode} onChange={setMode} />
+        </div>
+
+        <div className="mt-4 flex items-start gap-2 rounded-lg bg-accent-500/[0.06] px-3 py-2.5 dark:bg-accent-500/10">
           <Quote size={15} className="mt-0.5 shrink-0 text-accent-500/70" />
           <p className="text-base font-medium leading-relaxed">{result.summary}</p>
         </div>
-        {result.note && result.mode !== 'model' && (
-          <p className="mt-1 flex items-center gap-1 text-xs text-gray-500"><Info size={12} /> {result.note}</p>
-        )}
 
         {viewMode === 'tabs' ? (
           <>

@@ -90,6 +90,10 @@ function ExpertiseUsed({ refs, domainsCoordinated }) {
  * parse failure is expected and just falls back to rendering nothing until it completes,
  * rather than flashing broken JSON at the person.
  */
+// Explicit, clearly-stepped sizes for named sections ("Recommended approach", "Warnings") so
+// they read as real headings at a glance, rather than leaning on the prose plugin's default
+// scale (which, at prose-sm/base, lands close enough to bold body text that a header and a
+// bold lead-in sentence were hard to tell apart — see docs/UX_FONT_SCALE_NOTES).
 const markdownComponents = {
   code(props) {
     const { children, className, node, ...rest } = props
@@ -104,6 +108,10 @@ const markdownComponents = {
     }
     return <code {...rest} className={className}>{children}</code>
   },
+  h1: ({ children }) => <h1 className="mb-2.5 mt-5 text-xl font-bold tracking-tight first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="mb-2 mt-5 text-lg font-bold tracking-tight first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="mb-1.5 mt-4 text-base font-semibold first:mt-0">{children}</h3>,
+  h4: ({ children }) => <h4 className="mb-1 mt-3 text-[15px] font-semibold first:mt-0">{children}</h4>,
 }
 
 function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
@@ -215,18 +223,16 @@ function WeighedSection({ msg }) {
     )
   }
   if (!result) return null
-  const experts = result.experts || []
-  const domains = new Set(experts.map((x) => x.domain)).size
   return (
     <div className="mt-4 rounded-2xl p-4 ring-1 ring-accent-500/30 animate-fadeIn">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-accent-500/15 text-accent-600 dark:text-accent-400"><Scale size={13} /></span>
+      {/* Domain count used to repeat here AND as pills in WeighPanel's own header right below —
+          dropped here since the pills already say it, and said it more usefully (which domains,
+          not just how many). */}
+      <div className="flex items-center gap-2">
+        <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-accent-500/15 text-accent-600 dark:text-accent-400"><Scale size={13} /></span>
         <span className="text-sm font-semibold">Experts weighed together</span>
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-          {domains === experts.length ? `${domains} domains` : `${experts.length} experts · ${domains} domains`}
-        </span>
       </div>
-      {result.trigger && <p className="mt-1 text-xs text-gray-500">{result.trigger}</p>}
+      {result.trigger && <p className="mt-1 pl-[30px] text-xs text-gray-500">{result.trigger}</p>}
       <WeighPanel result={result} />
     </div>
   )
