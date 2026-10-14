@@ -13,7 +13,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { Link } from 'react-router-dom'
 import {
   Scale, Handshake, TriangleAlert, OctagonAlert, Lightbulb, UserCheck, CircleHelp, CircleCheck, CircleDot,
-  Link2, Info, ChevronDown, ChevronRight, Rows3, Columns3,
+  Link2, Info, ChevronDown, ChevronRight, Rows3, Columns3, Copy, Check, Quote,
 } from 'lucide-react'
 import { TAXONOMY } from '../data/taxonomy'
 
@@ -51,15 +51,56 @@ function DomainPill({ expert, showName: forced = false }) {
   )
 }
 
-// A section's heading, used identically in both view modes. In "sections" mode each one is
-// also the scroll-spy anchor (registerRef); in "tabs" mode the tab bar already carries the
-// title, so the page just renders the content below it.
-function SectionHeading({ icon: Icon, tone, title, hint }) {
+// A section's heading, used identically in both view modes — numbered like a doc's own
+// table of contents (1., 2., 3. …) so the structure reads the same way a written report's
+// would, not just a list of cards. In "sections" mode each one is also the scroll-spy anchor
+// (registerRef); in "tabs" mode the tab bar already carries the label, so this still runs
+// above the content for the same visual weight as every other heading in the result.
+function SectionHeading({ icon: Icon, tone, title, number, hint }) {
   return (
-    <h4 className="flex flex-wrap items-center gap-x-1.5 text-base font-semibold tracking-tight">
-      <Icon size={16} className={tone} /> {title}
-      {hint && <span className="w-full pl-[22px] text-xs font-normal text-gray-500 sm:w-auto sm:pl-0">{hint}</span>}
+    <h4 className="flex flex-wrap items-baseline gap-x-2">
+      <span className="flex items-center gap-1.5 text-lg font-semibold tracking-tight">
+        <span className="text-gray-400 dark:text-gray-600">{number}.</span>
+        <Icon size={17} className={tone} /> {title}
+      </span>
+      {hint && <span className="w-full pl-7 text-xs font-normal text-gray-500 sm:w-auto sm:pl-0">{hint}</span>}
     </h4>
+  )
+}
+
+// A small bordered "canvas" block — header bar with a label and a copy button, content
+// below — for the one section worth lifting out and pasting elsewhere as-is (the action
+// plan), the same way a generated document gets its own card with a copy affordance.
+function CanvasCard({ title, icon: Icon, copyText, children }) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(copyText)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard permission can be denied or unavailable — not worth surfacing an error for.
+    }
+  }
+  return (
+    <div className="overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-gray-800">
+      <div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-1.5 dark:border-gray-800 dark:bg-gray-900/60">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-gray-500">
+          {Icon && <Icon size={13} />} {title}
+        </span>
+        {copyText && (
+          <button
+            type="button"
+            onClick={onCopy}
+            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-gray-500 transition hover:bg-gray-200 dark:hover:bg-gray-700"
+          >
+            {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        )}
+      </div>
+      <div className="p-3">{children}</div>
+    </div>
   )
 }
 
@@ -246,7 +287,7 @@ function SectionNav({ sections, active, onJump }) {
       <div className="sticky top-2 border-l border-gray-200 pl-3 text-xs dark:border-gray-800">
         <p className="mb-1.5 font-medium text-gray-400">On this answer</p>
         <ul className="space-y-1.5">
-          {sections.map((s) => (
+          {sections.map((s, i) => (
             <li key={s.id}>
               <button
                 type="button"
@@ -257,7 +298,7 @@ function SectionNav({ sections, active, onJump }) {
                     : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
-                {s.label}
+                {i + 1}. {s.label}
               </button>
             </li>
           ))}
@@ -322,6 +363,13 @@ export default function WeighPanel({ result }) {
     document.querySelector(`[data-section-id="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  const suggestionsPlainText = useMemo(
+    () => result.suggestions
+      .map((s, i) => `${i + 1}. ${s.text}${s.rationale ? ` — ${s.rationale}` : ''}`)
+      .join('\n'),
+    [result.suggestions],
+  )
+
   if (!result.experts.length) {
     return <p className="mt-2 text-[15px] text-gray-600 dark:text-gray-400">{result.summary}</p>
   }
@@ -336,9 +384,12 @@ export default function WeighPanel({ result }) {
       <ul className="space-y-2">
         {result.overlaps.map((o, i) => (
           <li key={i} className="rounded-xl bg-emerald-500/5 p-3 ring-1 ring-emerald-500/20">
-            <p className="text-sm font-semibold">{o.point}</p>
-            {o.detail && <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-400">{o.detail}</p>}
-            <div className="mt-1.5 flex flex-wrap gap-1">{o.expertiseIds.map((id) => <DomainPill key={id} expert={byId[id]} />)}</div>
+            <p className="flex items-start gap-1.5 text-sm font-semibold">
+              <CircleCheck size={15} className="mt-0.5 shrink-0 text-emerald-500" />
+              <span>{o.point}</span>
+            </p>
+            {o.detail && <p className="mt-0.5 pl-[22px] text-sm text-gray-600 dark:text-gray-400">{o.detail}</p>}
+            <div className="mt-1.5 flex flex-wrap gap-1 pl-[22px]">{o.expertiseIds.map((id) => <DomainPill key={id} expert={byId[id]} />)}</div>
           </li>
         ))}
       </ul>
@@ -386,9 +437,10 @@ export default function WeighPanel({ result }) {
           </div>
         </div>
 
-        <p className="mt-3 border-l-2 border-accent-400/60 pl-3 text-base font-medium leading-relaxed dark:border-accent-500/50">
-          {result.summary}
-        </p>
+        <div className="mt-3 flex items-start gap-2 rounded-lg bg-accent-500/[0.06] px-3 py-2.5 dark:bg-accent-500/10">
+          <Quote size={15} className="mt-0.5 shrink-0 text-accent-500/70" />
+          <p className="text-base font-medium leading-relaxed">{result.summary}</p>
+        </div>
         {result.note && result.mode !== 'model' && (
           <p className="mt-1 flex items-center gap-1 text-xs text-gray-500"><Info size={12} /> {result.note}</p>
         )}
@@ -396,7 +448,7 @@ export default function WeighPanel({ result }) {
         {viewMode === 'tabs' ? (
           <>
             <div className="mt-4 flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
-              {sections.map((s) => (
+              {sections.map((s, i) => (
                 <button
                   key={s.id}
                   type="button"
@@ -407,6 +459,7 @@ export default function WeighPanel({ result }) {
                       : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                   }`}
                 >
+                  <span className="text-gray-400 dark:text-gray-600">{i + 1}.</span>
                   <s.icon size={14} className={s.tone} /> {s.label}
                 </button>
               ))}
@@ -415,18 +468,28 @@ export default function WeighPanel({ result }) {
               {sections.filter((s) => s.id === activeTab).map((s) => (
                 <div key={s.id}>
                   {s.hint && <p className="mb-2 text-xs text-gray-500">{s.hint}</p>}
-                  {content[s.id]}
+                  {s.id === 'suggestions' ? (
+                    <CanvasCard title="Action plan" icon={Lightbulb} copyText={suggestionsPlainText}>{content[s.id]}</CanvasCard>
+                  ) : content[s.id]}
                 </div>
               ))}
             </div>
           </>
         ) : (
-          <div className="mt-4 flex gap-6">
+          <div className="mt-5 flex gap-6">
             <div className="min-w-0 flex-1">
-              {sections.map((s) => (
-                <section key={s.id} ref={registerRef(s.id)} className="mt-5 scroll-mt-4 first:mt-0">
-                  <SectionHeading icon={s.icon} tone={s.tone} title={s.label} hint={s.hint} />
-                  <div className="mt-2">{content[s.id]}</div>
+              {sections.map((s, i) => (
+                <section
+                  key={s.id}
+                  ref={registerRef(s.id)}
+                  className="mt-6 scroll-mt-4 border-t border-gray-100 pt-5 first:mt-0 first:border-0 first:pt-0 dark:border-gray-800"
+                >
+                  <SectionHeading icon={s.icon} tone={s.tone} title={s.label} number={i + 1} hint={s.hint} />
+                  <div className="mt-2.5">
+                    {s.id === 'suggestions' ? (
+                      <CanvasCard title="Action plan" icon={Lightbulb} copyText={suggestionsPlainText}>{content[s.id]}</CanvasCard>
+                    ) : content[s.id]}
+                  </div>
                 </section>
               ))}
             </div>
