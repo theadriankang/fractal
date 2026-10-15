@@ -184,3 +184,7 @@ def test_deleted_draft_sends_the_gap_back_to_open(db):
     g.status, g.expertise_id = "drafting", None  # what ON DELETE SET NULL leaves behind
     db.commit()
     assert client.get("/api/gaps", headers=as_(PRIYA)).json()[0]["status"] == "open"
+
+def test_equipment_words_point_to_a_domain_when_nothing_else_does(db):
+    assert log(PRIYA, VRF)["gap"]["domain"] == "Technical Services"  # "troubleshoot", "VRF"
+    assert log(PRIYA, "What feed-in tariff did we sign for the rooftop panels?")["gap"]["domain"] == "Energy Optimisation"

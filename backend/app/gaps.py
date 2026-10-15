@@ -23,6 +23,15 @@ MAX_EXAMPLES = 10
 # Nearest-Expertise similarity needed before its domain is used as the gap's domain guess.
 # bge-small cosine scores sit high even for loosely related text, so this is deliberately strict.
 DOMAIN_GUESS_MIN = 0.62
+# Extra words that point at a domain without naming it (equipment, faults, leases). Only used to
+# guess a gap's domain; weighing keeps its own, stricter list (weigh/engine.py DOMAIN_WORDS).
+DOMAIN_HINTS = {
+    "Technical Services": r"troubleshoot|fault|repair|breakdown|leak|alarm|\btrip|\bvrf\b|\bahu\b|\blifts?\b|escalator|"
+                          r"\bpump|generator|\bups\b|chiller|plumbing|electrical",
+    "Energy Optimisation": r"\bkwh\b|\bkw\b|tariff|solar|baseload|setpoint",
+    "Leasing": r"tenancy|rent review|vacancy|letting",
+    "Sustainability": r"recycl|waste|water consumption|scope [123]",
+}
 _WORDS = re.compile(r"[a-z0-9]+")
 _STOP = set("a an the and or of to in on at for with is are was were be do does did how what when why "
             "where which who can could should would we our you your i my it this that there any".split())
@@ -65,7 +74,10 @@ def guess_domain(question: str, near: dict | None) -> str | None:
         return named[0]
     if near and near.get("similarity", 0) >= DOMAIN_GUESS_MIN:
         return near["domain"]
-    return named[0] if named else None
+    if named:
+        return named[0]
+    hinted = [d for d, pattern in DOMAIN_HINTS.items() if re.search(pattern, q)]
+    return hinted[0] if hinted else None
 
 
 def assess(db: Session, question: str) -> dict:
