@@ -10,6 +10,7 @@ import ExpertiseDetail from './pages/ExpertiseDetail'
 import ReviewQueue from './pages/ReviewQueue'
 import AuditLog from './pages/AuditLog'
 import Impact from './pages/Impact'
+import KnowledgeGaps from './pages/KnowledgeGaps'
 import MeetingRecorder from './pages/MeetingRecorder'
 import WritingAssistant from './pages/WritingAssistant'
 import Insights from './pages/Insights'
@@ -72,6 +73,7 @@ function Shell() {
             <Route path="review" element={<ReviewQueue />} />
             <Route path="audit" element={<AuditLog />} />
             <Route path="impact" element={<Impact />} />
+            <Route path="gaps" element={<KnowledgeGaps />} />
             <Route path="d/:slug" element={<ExpertiseDomain />} />
             <Route path=":id" element={<ExpertiseDetail />} />
           </Route>

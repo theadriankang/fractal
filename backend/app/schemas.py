@@ -355,6 +355,20 @@ class HealthOut(CamelModel):
     transcribe: str  # active TRANSCRIBE backend (app/config.py) — "browser" is the only one implemented
 
 
+# --- Knowledge gaps ---------------------------------------------------------
+# What a real question needed that no approved Expertise covers (app/knowledge_gaps.py).
+class GapOut(CamelModel):
+    id: str
+    text: str
+    domains: list[str] = Field(default_factory=list)
+    question: str = ""
+    status: str = "open"
+    hits: int = 1
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    resolved_expertise_id: Optional[str] = None
+
+
 # ===========================================================================
 # Chat-stream schemas (Claude chat backend — from origin/main)
 # ===========================================================================

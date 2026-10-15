@@ -436,6 +436,12 @@ export function apiFor(user) {
     // Aggregated usage/approval/feedback numbers -- a single read-only snapshot
     // of whether the system is actually being used, not just capable of it.
     getImpact: () => call('GET', '/impact'),
+
+    // Knowledge gaps -- what questions the approved Expertise can't answer yet, surfaced
+    // by the Weigh engine and persisted so a repeated gap stands out (app/knowledge_gaps.py).
+    listGaps: (status) => call('GET', `/knowledge-gaps${status ? '?status=' + status : ''}`),
+    dismissGap: (id) => call('POST', `/knowledge-gaps/${enc(id)}/dismiss`),
+    resolveGap: (id, expertiseId) => call('POST', `/knowledge-gaps/${enc(id)}/resolve`, { expertiseId: expertiseId ?? null }),
   }
 }
 

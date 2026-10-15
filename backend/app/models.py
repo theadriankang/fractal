@@ -204,3 +204,23 @@ class AuditLog(Base):
     target_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class KnowledgeGap(Base):
+    """A thing a real question needed that no approved Expertise covers -- surfaced by the
+    weighing engine's own "gaps" field (app/weigh/engine.py) whenever it weighs a question
+    against the Expertise it found. Repeated gaps are the signal: the same unanswered need
+    showing up across many questions is a stronger prompt to go document it than any single
+    occurrence. See app/knowledge_gaps.py for how rows are deduplicated and counted."""
+    __tablename__ = "knowledge_gaps"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid_str)
+    text: Mapped[str] = mapped_column(Text, default="")
+    # Lowercased/whitespace-collapsed form of `text`, used only to detect repeats.
+    normalized: Mapped[str] = mapped_column(Text, default="")
+    domains: Mapped[list] = mapped_column(JSON, default=list)
+    question: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String, default="open")  # open | resolved | dismissed
+    hits: Mapped[int] = mapped_column(Integer, default=1)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    resolved_expertise_id: Mapped[str | None] = mapped_column(Text, nullable=True)

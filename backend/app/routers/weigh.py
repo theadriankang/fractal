@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from .. import knowledge_gaps
 from ..db import get_db
 from ..config import settings
 from ..llm import claude
@@ -39,4 +40,9 @@ async def weigh_expertise(req: WeighRequest, db: Session = Depends(get_db)) -> W
         result = await weigh(question, picked, req.context, client)
     if result.triggered:
         result.markdown = to_markdown(result)
+    if result.gaps:
+        # The engine already named what this question needed that no approved Expertise
+        # covers -- persist it (deduplicated) rather than letting it disappear once the
+        # Weigh panel closes. See app/knowledge_gaps.py.
+        knowledge_gaps.record_gaps(db, result.gaps, [e.domain for e in result.experts], result.question)
     return result

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Search, ChevronRight, LayoutGrid, ShieldCheck, Plus, X, ClipboardList, BarChart3 } from 'lucide-react'
+import { Search, ChevronRight, LayoutGrid, ShieldCheck, Plus, X, ClipboardList, BarChart3, CircleHelp } from 'lucide-react'
 import { useStore, reviewCount } from '../store'
 import { contributeBlock, canOpenQueue } from '../lib/permissions'
 import { buildTree, slugify, ASSET_TYPES, domainMeta } from '../data/taxonomy'
@@ -93,6 +93,11 @@ export default function ExpertiseNav() {
           {canOpenQueue(user) && (
             <NavLink to="/expertise/impact" className={linkCls}>
               <BarChart3 size={15} /> <span className="flex-1">Impact</span>
+            </NavLink>
+          )}
+          {canOpenQueue(user) && (
+            <NavLink to="/expertise/gaps" className={linkCls}>
+              <CircleHelp size={15} /> <span className="flex-1">Knowledge Gaps</span>
             </NavLink>
           )}
         </div>
