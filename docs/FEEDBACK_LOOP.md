@@ -40,7 +40,7 @@ Every rating now records the version it rated. The Expertise page shows the 👍
 |---|---|
 | Backend | `backend/app/loop/` (`schemas.py`, `correct.py`, `replay.py`), `backend/app/routers/loop.py`, settings in `config.py` |
 | Front end | `src/lib/feedbackLoop.js` (pure helpers), `src/components/FeedbackLoop.jsx` (Review Queue pieces), store actions `rateResponse` · `submitCorrection` · `runProposalTest` · `approveProposal` |
-| Persistence | `supabase/migrations/20261015120000_feedback_loop.sql`: `proposals.loop` (diagnosis, `set`, test question, reports, last test run) and `expertise.test_cases`. Routes: `POST /api/proposals` (with `loop`), `PATCH /api/proposals/{id}` (merge a report, save a test run), `PUT /api/expertise/{id}/test-cases`. Approval (`governance.apply_list_change`, `apply_set`, `add_test_case`) rewrites steps in place, applies `set` and saves the test question. |
+| Persistence | `supabase/migrations/20261015061738_feedback_loop.sql`: `proposals.loop` (diagnosis, `set`, test question, reports, last test run) and `expertise.test_cases`. Routes: `POST /api/proposals` (with `loop`), `PATCH /api/proposals/{id}` (merge a report, save a test run), `PUT /api/expertise/{id}/test-cases`. Approval (`governance.apply_list_change`, `apply_set`, `add_test_case`) rewrites steps in place, applies `set` and saves the test question. |
 | Tests | `backend/tests/test_loop.py` (14 tests, Claude stubbed) · loop persistence in `backend/tests/test_persistence.py` (4 tests) · `npm run validate:loop` (10 checks) |
 
 **Stack:** React + Zustand · FastAPI · Claude Haiku (corrections, answers) + Claude Sonnet (grading) via the Anthropic SDK · Pydantic · Supabase Postgres. No new services.
