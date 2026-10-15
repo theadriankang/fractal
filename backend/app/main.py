@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .guard import DemoGuard
-from .routers import audit, capture, chat, chats, expertise, files, insights, loop, proposals, health, responses, writing, weigh
+from .routers import audit, capture, chat, chats, expertise, files, impact, insights, loop, proposals, health, responses, writing, weigh
 
 app = FastAPI(title="Fractal backend", version="0.1.0")
 
@@ -32,6 +32,7 @@ app.include_router(audit.router)
 app.include_router(insights.router)
 app.include_router(weigh.router)
 app.include_router(loop.router)
+app.include_router(impact.router)
 
 
 @app.on_event("startup")

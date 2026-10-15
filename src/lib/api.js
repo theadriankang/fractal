@@ -429,6 +429,10 @@ export function apiFor(user) {
       const s = qs.toString()
       return call('GET', `/audit${s ? '?' + s : ''}`)
     },
+
+    // Aggregated usage/approval/feedback numbers -- a single read-only snapshot
+    // of whether the system is actually being used, not just capable of it.
+    getImpact: () => call('GET', '/impact'),
   }
 }
 
