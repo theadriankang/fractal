@@ -286,11 +286,14 @@ async function save(body: any, req: Request) {
   return json({ meeting: data });
 }
 
-async function list(body: any) {
+async function list(body: any, req: Request) {
+  const user = await sessionUser(req);
+  if (!user) return json({ error: "Unauthorized" }, 401);
   const limit = Math.min(50, Math.max(1, Number(body.limit) || 10));
   const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const { data, error } = await db.from("meetings")
     .select("id, title, raw_transcript, cleaned_transcript, attached_files, summary, key_takeaways, action_items, expertise_links, duration, recorded_by, recorded_by_id, created_at")
+    .eq("user_id", user.id)
     .order("created_at", { ascending: false }).limit(limit);
   if (error) return json({ error: error.message }, 500);
   return json({ meetings: data });
@@ -303,7 +306,7 @@ Deno.serve(async (req) => {
     const body = await req.json();
     if (body.action === "insights") return await insights(body);
     if (body.action === "save") return await save(body, req);
-    if (body.action === "list") return await list(body);
+    if (body.action === "list") return await list(body, req);
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
