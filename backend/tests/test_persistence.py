@@ -356,3 +356,66 @@ def test_repeat_views_of_a_source_chat_are_logged_once(db):
     for _ in range(3):
         assert client.get("/api/chats/chat-src", headers=as_(ADRIAN)).status_code == 200
     assert db.query(AuditLog).filter_by(action="chat.view_source", target_id="chat-src").count() == 1
+
+
+# --- feedback loop persistence (docs/FEEDBACK_LOOP.md) -----------------------------------
+
+def _live_with_steps(db):
+    client.post("/api/expertise/exp-chiller/approve", headers=as_(ADRIAN))
+    e = db.get(Expertise, "exp-chiller")
+    e.decision_logic = [{"text": "Check load."}, {"text": "Check strainer."}, {"text": "Stage up standby."}]
+    db.commit()
+
+
+def test_thumbs_down_with_propose_false_saves_feedback_only(db):
+    _send()
+    out = client.post("/api/responses/r1/rating", headers=as_(PRIYA),
+                      json={"rating": "down", "comment": "Step 2 is out of date.", "chatId": "chat-a", "propose": False}).json()
+    assert out["proposal"] is None
+    assert out["expertise"][0]["feedback"][0]["comment"] == "Step 2 is out of date."
+    assert client.get("/api/proposals").json() == []
+
+
+def test_loop_proposal_round_trip_merge_test_run_and_approve(db):
+    _live_with_steps(db)
+    loop = {"origin": "feedback", "diagnosis": "expertise_wrong", "confidence": 0.9, "engine": "ai", "baseVersion": "1.0",
+            "set": {"whenToUse": "CHWST above 7.5 °C on a tower floor."}, "reportCount": 1,
+            "reports": [{"user": "Priya S.", "comment": "Step 2 is out of date."}],
+            "testCase": {"question": "CHWST is 8.1 °C, what do I check?", "mustDo": ["Check the VSD fault log"], "mustNotDo": []}}
+    body = {"id": "prop-loop", "expertiseId": "exp-chiller", "author": "Priya S. (via 👎 feedback)", "reason": "Step 2 is out of date.",
+            "changes": {"decisionLogic": {"add": ["Check the CHW pump VSD fault log."], "remove": ["Check strainer."]}}, "loop": loop}
+    p = client.post("/api/proposals", json=body, headers=as_(PRIYA)).json()
+    assert p["loop"]["diagnosis"] == "expertise_wrong" and p["loop"]["testCase"]["mustDo"] == ["Check the VSD fault log"]
+
+    # a second report merges in; the reviewer's test run is saved; other domains can't touch it
+    merged = client.patch("/api/proposals/prop-loop", headers=as_(HAFIZ), json={"loop": {"reportCount": 2}}).json()
+    assert merged["loop"]["reportCount"] == 2 and merged["loop"]["diagnosis"] == "expertise_wrong"
+    run = {"status": "done", "summary": {"total": 2, "fixed": 1, "broke": 0}}
+    assert client.patch("/api/proposals/prop-loop", headers=as_(ADRIAN), json={"loop": {"testRun": run}}).json()["loop"]["testRun"] == run
+    assert client.patch("/api/proposals/prop-loop", headers=as_(MARCUS), json={"loop": {"reportCount": 9}}).status_code == 403
+    assert client.get("/api/proposals").json()[0]["loop"]["reportCount"] == 2
+
+    e = client.post("/api/proposals/prop-loop/approve", headers=as_(ADRIAN)).json()
+    assert [s["text"] for s in e["decisionLogic"]] == ["Check load.", "Check the CHW pump VSD fault log.", "Stage up standby."]
+    assert e["whenToUse"] == "CHWST above 7.5 °C on a tower floor."
+    assert e["testCases"][0]["question"] == "CHWST is 8.1 °C, what do I check?" and e["testCases"][0]["source"] == "correction"
+    assert e["version"] == "1.1"
+    assert client.patch("/api/proposals/prop-loop", headers=as_(ADRIAN), json={"loop": {}}).status_code == 409
+
+
+def test_insert_after_keeps_step_order(db):
+    _live_with_steps(db)
+    client.post("/api/proposals", headers=as_(PRIYA), json={
+        "id": "prop-ins", "expertiseId": "exp-chiller", "author": "Priya S.", "reason": "Missing step",
+        "changes": {"decisionLogic": {"add": ["Check the VSD fault log."], "remove": [], "insertAfter": 0}}})
+    e = client.post("/api/proposals/prop-ins/approve", headers=as_(ADRIAN)).json()
+    assert [s["text"] for s in e["decisionLogic"]] == ["Check load.", "Check the VSD fault log.", "Check strainer.", "Stage up standby."]
+
+
+def test_saving_test_cases(db):
+    cases = [{"id": "case-1", "question": "Level 23 is warm, what first?", "referenceAnswer": "Check load.", "source": "thumbs_up"},
+             {"id": "case-2", "question": "  "}]
+    e = client.put("/api/expertise/exp-chiller/test-cases", headers=as_(ETHAN), json={"testCases": cases}).json()
+    assert [c["id"] for c in e["testCases"]] == ["case-1"]
+    assert client.put("/api/expertise/nope/test-cases", headers=as_(ETHAN), json={"testCases": []}).status_code == 404
+    assert client.put("/api/expertise/exp-chiller/test-cases", json={"testCases": []}).status_code == 401

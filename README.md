@@ -95,7 +95,7 @@ Check the frontend service with `npm run test:writing`. Run backend checks from
 4. **New chat**: "When the lift at Tower B keeps stopping between floors, we always check the door lock contacts first. In my experience it's usually dust on the contacts, not the controller." → **Save as draft** → *captures undocumented know-how*.
 5. Open the draft → **Edit** (add decision logic + guardrails) → **Submit for review**.
 6. **Review Queue** → switch role to Contributor (approve is blocked) → switch to Reviewer → **Approve** → v1.0 is live → *human-supervised, governed*.
-7. Back in chat, 👎 an answer with a correction → it appears as a **proposed revision** → *learns through governed feedback*.
+7. Back in chat, 👎 an answer with a correction (e.g. *"Step 2 is out of date — we check the VSD fault log first"*) → the Review Queue shows a diagnosed **proposed revision** that rewrites that step in place → **Test change** compares old vs new answers on saved questions → approve → *learns through governed feedback* (see `docs/FEEDBACK_LOOP.md`).
 8. **Compare** Claude vs GPT vs Hunyuan on the same prompt — same Expertise, any model → *portable*.
 9. Ask *"Should we pre-cool Tower A from 7:00 on Mondays to cut the peak demand charge, even though the Level 23 tenant keeps complaining it's too warm?"* → under the answer, **Experts weighed together** shows Energy, Tenant Experience and Technical Services, the conflict, how to reconcile it, and who to loop in → *coordinates across domains, humans decide*. A plain question ("How do I triage a chiller alarm?") gets no weighing.
 
@@ -127,9 +127,10 @@ backend/
     llm/                     provider gateway (Claude, GPT, Gemini, Grok, Hunyuan, DeepSeek)
     retrieval/               Expertise matching (vector + keyword retrieval over approved records)
     capture/                 LLM extraction pass → draft Expertise / revision proposals
+    loop/                    feedback loop: 👎 correction → diagnosed revision; before/after test (correct, replay, schemas)
     weigh/                   cross-domain / same-domain Expertise weighing (engine, schemas, select)
     insights/                adaptive CSV/XLSX analysis (long / wide / snapshot shape detection) + report rendering
-    routers/                 chat, chats, expertise, proposals, weigh, insights, capture, files, audit, writing, health
+    routers/                 chat, chats, expertise, proposals, loop, weigh, insights, capture, files, audit, writing, health
   scripts/                   one-off DB migration/patch scripts (run manually against the live DB)
 ```
 
@@ -143,6 +144,7 @@ The frontend (`src/lib/api.js`) talks to the deployed FastAPI backend over `VITE
 | Expertise matching | `POST /api/expertise/match` | Retrieves relevant **approved** Expertise for a prompt (vector + keyword retrieval) |
 | Expertise capture | `POST /api/expertise/detect` | LLM extraction pass over a chat → draft Expertise or revision proposal |
 | Expertise CRUD | `/api/expertise`, `/api/proposals` | Persists Expertise, versions (snapshots), proposals, feedback; roles enforced server-side |
+| Feedback loop | `POST /api/loop/correction`, `POST /api/loop/test` | Turns a 👎 correction into a minimal, diagnosed revision; tests the current vs proposed version on saved questions, graded blind |
 | Cross-domain weighing | `POST /api/expertise/weigh` | When a question spans domains or experts conflict, surfaces each domain's view, the conflict, deciding factor, and suggestions |
 | Data Insights | `/api/insights/...` | Upload a CSV/XLSX (any shape — long, wide, or point-in-time snapshot), auto-detect metric/category/period columns, flag outliers, render a chart + narrative |
 | File uploads (chat) | `/api/files/...` | Accepts PDF, DOCX, XLSX, TXT, MD, CSV, and images as chat attachments |

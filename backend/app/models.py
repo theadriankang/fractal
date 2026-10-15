@@ -109,6 +109,8 @@ class Expertise(Base):
     escalation: Mapped[list] = mapped_column(JSON, default=list)
     sources: Mapped[list] = mapped_column(JSON, default=list)
     feedback: Mapped[list] = mapped_column(JSON, default=list)
+    # Saved test questions (feedback loop): from 👍 answers and approved corrections.
+    test_cases: Mapped[list] = mapped_column(JSON, default=list)
     origin: Mapped[str | None] = mapped_column(Text, nullable=True)
     capture: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     author_id: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -172,6 +174,9 @@ class Proposal(Base):
     sources: Mapped[list] = mapped_column(JSON, default=list)
     meeting_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     meeting_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Feedback-loop metadata for 👎 corrections: origin, diagnosis, confidence, engine, set,
+    # baseVersion, reportCount, reports, testCase, testRun (src/lib/feedbackLoop.js).
+    loop: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class Feedback(Base):

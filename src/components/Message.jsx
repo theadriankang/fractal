@@ -117,12 +117,15 @@ const markdownComponents = {
 function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
   const r = msg.responses[idx]
   const { regenerate, rateResponse, user, expertise } = useStore()
-  const usedDomain = expertise.find((e) => e.id === r.expertise?.[0]?.id)?.domain
-  // Corrections become proposals, so they follow the contribution rule; anyone can still rate.
-  const correctionBlock = usedDomain ? contributeBlock(user, usedDomain) : (user.role !== 'contributor' ? contributeBlock(user) : null)
   const [copied, setCopied] = useState(false)
   const [correcting, setCorrecting] = useState(false)
   const [correction, setCorrection] = useState('')
+  // Which applied Expertise the correction is about (asked only when more than one was used).
+  const used = (r.expertise || []).map((x) => expertise.find((e) => e.id === x.id)).filter(Boolean)
+  const [targetId, setTargetId] = useState(null)
+  const target = used.find((e) => e.id === targetId) || used[0]
+  // Corrections become proposals, so they follow the contribution rule; anyone can still rate.
+  const correctionBlock = target ? contributeBlock(user, target.domain) : (user.role !== 'contributor' ? contributeBlock(user) : null)
 
   const copy = () => {
     navigator.clipboard?.writeText(r.content)
@@ -184,13 +187,21 @@ function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
               ? 'Your feedback helps Fractal improve.'
               : correctionBlock
                 ? `Your feedback is recorded on the Expertise used. ${correctionBlock}`
-                : 'Your correction goes to the Review Queue as a proposed revision of the Expertise used. Nothing changes until a reviewer approves it.'}
+                : 'Fractal turns your correction into a precise change to the Expertise used and sends it to the Review Queue. Nothing changes until a reviewer approves it.'}
           </p>
+          {!correctionBlock && used.length > 1 && (
+            <label className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+              Which Expertise was wrong?
+              <select className="input w-auto py-1 text-xs" value={target?.id} onChange={(ev) => setTargetId(ev.target.value)}>
+                {used.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+            </label>
+          )}
           {!correctionBlock && <textarea
             autoFocus
             rows={2}
             className="input resize-none"
-            placeholder="e.g. You should also check the CHW pump VSD before staging up a chiller."
+            placeholder="e.g. Step 2 is out of date — since the retrofit we check the VSD fault log before the strainer."
             value={correction}
             onChange={(e) => setCorrection(e.target.value)}
           />}
@@ -199,7 +210,7 @@ function ResponseCard({ chatId, msg, idx, compare, readOnly }) {
             {!correctionBlock && <button
               className="btn-primary"
               disabled={!correction.trim()}
-              onClick={() => { rateResponse(chatId, msg.id, idx, 'down', correction); setCorrecting(false); setCorrection('') }}
+              onClick={() => { rateResponse(chatId, msg.id, idx, 'down', correction, target?.id); setCorrecting(false); setCorrection('') }}
             >
               Submit correction
             </button>}

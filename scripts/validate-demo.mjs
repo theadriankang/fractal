@@ -1,3 +1,4 @@
+import { itemKey } from '../src/lib/decisionLogic.js'
 import assert from 'node:assert/strict'
 import { createServer } from 'vite'
 
@@ -71,7 +72,7 @@ try {
     for (const [field, { add, remove }] of Object.entries(p.changes)) {
       assert(['knowledge', 'decisionLogic', 'guardrails', 'escalation'].includes(field))
       assert(add.length || remove.length)
-      for (const item of remove) assert(target[field].includes(item), p.id + ': removal does not match target')
+      for (const item of remove) assert(target[field].some((x) => itemKey(x) === itemKey(item)), p.id + ': removal does not match target')
       for (const item of add) assert(!target[field].includes(item), p.id + ': addition already exists')
     }
   }
