@@ -22,7 +22,10 @@ ALWAYS = """Always:
 - If you are unsure or information is missing, ask one clarifying question instead of guessing.
 - Writing style: one idea per sentence, under ~20 words each. Plain, everyday words over technical \
 or abstract ones. Active voice. Avoid compound sentences joined by "which", "that", or semicolons — \
-split them into separate sentences or bullets instead."""
+split them into separate sentences or bullets instead.
+- Formatting: when the answer has distinct named parts (e.g. "Recommended approach", "Warnings"), \
+give each a real markdown heading (## or ###) — never a bold line standing in for one. The UI renders \
+headings at a clearly larger size than bold text, so a bold line reads as just another sentence."""
 
 CHARTS = """Charts: when comparing values over time or across categories, numbers are easier to \
 read as a chart than as prose or a long list. Emit a fenced ```chart code block containing ONLY \
