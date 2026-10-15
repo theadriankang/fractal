@@ -168,6 +168,35 @@ def search(
     return results[:limit]
 
 
+def nearest(db: Session, query: str) -> dict | None:
+    """The single closest approved Expertise, ignoring every threshold: {id, name, domain, similarity}.
+
+    Used to guess which domain an unanswered question belongs to (app/gaps.py). Similarity is the
+    raw cosine on Postgres, or keyword overlap on SQLite; None when nothing is even close.
+    """
+    try:
+        if _ensure_table(db):
+            q_str = _vector_to_pg(embedder.embed_text(query))
+            row = db.execute(text("""
+                select e.id, e.name, e.domain, 1 - (emb.embedding <=> cast(:q as extensions.vector)) as sim
+                from expertise_embeddings emb join expertise e on e.id = emb.expertise_id
+                where e.status = 'approved'
+                order by emb.embedding <=> cast(:q as extensions.vector)
+                limit 1
+            """), {"q": q_str}).first()
+            return {"id": row[0], "name": row[1], "domain": row[2], "similarity": float(row[3])} if row else None
+        q_lower = query.lower()
+        best = max(
+            ((e, _keyword_overlap(q_lower, e.keywords or [])) for e in db.query(Expertise).filter(Expertise.status == "approved")),
+            key=lambda pair: pair[1], default=(None, 0.0),
+        )
+        e, overlap = best
+        return {"id": e.id, "name": e.name, "domain": e.domain, "similarity": overlap} if e is not None and overlap > 0 else None
+    except Exception as exc:  # a domain guess is a nicety; never fail the caller over it
+        logger.warning("nearest() failed: %s", exc)
+        return None
+
+
 def sync_missing(db: Session) -> int:
     """Embed every approved Expertise that has no embedding (or a stale one). Returns how many changed.
 

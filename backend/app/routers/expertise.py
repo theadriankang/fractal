@@ -13,6 +13,7 @@ from ..db import get_db
 from ..governance import (
     add_version, audit, bump_version, load_expertise_out, missing_for_review, one_expertise_out, restore, snapshot,
 )
+from ..gaps import resolve_for_approved as resolve_gaps_for_approved
 from ..models import Expertise, ExpertiseVersion, Profile
 from ..retrieval.index import delete_embedding, index_expertise, search as retrieval_search
 from ..schemas import (
@@ -238,6 +239,8 @@ def approve_expertise(
     e.reviewer = user.name
     add_version(db, e, author=e.owner, approved_by=user.name, note=body.note, snap=snapshot(e))
     audit(db, user, "expertise.approve", "expertise", e.id, version=e.version, note=body.note)
+    # Knowledge gaps this draft was captured for are now answered.
+    resolve_gaps_for_approved(db, e, user)
     return _save(db, e)
 
 

@@ -204,3 +204,32 @@ class AuditLog(Base):
     target_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class KnowledgeGap(Base):
+    """A question approved Expertise couldn't answer (no match, or only a weak one).
+
+    Similar questions merge into one gap, so the Review Queue can show "asked 8 times by 5 people".
+    Lifecycle: open -> drafting (an expert started a draft from it) -> resolved (that draft was
+    approved, or a re-check found approved Expertise now covers it); or dismissed (off-topic).
+    See backend/app/gaps.py.
+    """
+
+    __tablename__ = "knowledge_gaps"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)  # the first wording seen
+    domain: Mapped[str | None] = mapped_column(Text, nullable=True)  # best guess; None = unsorted
+    kind: Mapped[str] = mapped_column(String, default="none")  # none = nothing matched, weak = low confidence
+    best_score: Mapped[float] = mapped_column(Float, default=0.0)
+    nearest_expertise_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nearest_expertise_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="open")
+    ask_count: Mapped[int] = mapped_column(Integer, default=1)
+    askers: Mapped[list] = mapped_column(JSON, default=list)  # [{id, name}] distinct people
+    examples: Mapped[list] = mapped_column(JSON, default=list)  # latest wordings [{question, asker, chatId, at}]
+    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)  # for merging similar questions
+    expertise_id: Mapped[str | None] = mapped_column(String, ForeignKey("expertise.id", ondelete="SET NULL"), nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_asked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

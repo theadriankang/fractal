@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     # experts. False = weigh only when the question itself asks about two areas or a trade-off.
     weigh_auto_check: bool = True
 
+    # Knowledge gaps (backend/app/gaps.py): a chat question whose best approved match scores
+    # below this is logged as a gap ("weak"); no match at all is logged as "none".
+    gap_weak_score: float = 0.50
+    # Two questions with embeddings at least this similar count as the same gap.
+    gap_merge_similarity: float = 0.85
+    gap_min_words: int = 4
+
     # Expertise retrieval (embeddings)
     embedding_provider: str = "local"  # "local" (fastembed) or "litellm"
     embedding_model: str = ""  # for litellm, e.g. "text-embedding-3-small"
