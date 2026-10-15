@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { Settings2, Plug, Sparkles, BookOpenCheck, Info, Sun, Moon, Monitor, Eye, EyeOff, CheckCircle2, Lock, X } from 'lucide-react'
+import { Settings2, Plug, Sparkles, BookOpenCheck, Info, Sun, Moon, Monitor, Lock, X } from 'lucide-react'
 import { useStore } from '../store'
 import { PROVIDERS, ROUTES, getModel } from '../data/models'
 import { Modal, Toggle, ProviderIcon, Logo } from './ui'
@@ -54,12 +53,12 @@ function General() {
 }
 
 function Connections() {
-  const { settings, updateConnection, showToast } = useStore()
-  const [show, setShow] = useState({})
+  const { settings, updateConnection } = useStore()
   return (
     <div className="space-y-2">
       <p className="mb-3 text-sm text-gray-500">
-        Add a key per provider. Keys will be stored server-side once the backend exists — in this prototype they stay in your browser only.
+        Provider API keys live server-side (<code className="font-mono text-xs">backend/.env</code>) and are never entered or stored in the browser.
+        Toggle a provider off to hide its models from the picker.
       </p>
       {PROVIDERS.map((p) => {
         const c = settings.connections[p.id]
@@ -68,32 +67,11 @@ function Connections() {
             <div className="flex items-center gap-3">
               <ProviderIcon providerId={p.id} size={26} />
               <span className="flex-1 text-sm font-medium">{p.name}</span>
-              {c.apiKey && <span className="flex items-center gap-1 text-xs text-emerald-500"><CheckCircle2 size={13} /> Key added</span>}
               <Toggle checked={c.enabled} onChange={(v) => updateConnection(p.id, { enabled: v })} />
             </div>
-            {c.enabled && (
-              <div className="mt-3 flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type={show[p.id] ? 'text' : 'password'}
-                    className="input pr-9 font-mono text-xs"
-                    placeholder={`${p.name} API key`}
-                    value={c.apiKey}
-                    onChange={(e) => updateConnection(p.id, { apiKey: e.target.value })}
-                  />
-                  <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400" onClick={() => setShow({ ...show, [p.id]: !show[p.id] })}>
-                    {show[p.id] ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-                <button className="btn-outline text-xs" onClick={() => showToast(c.apiKey ? `${p.name}: connection OK (mock)` : 'Add a key first')}>Test</button>
-              </div>
-            )}
           </div>
         )
       })}
-      <button className="btn-outline mt-2 w-full" onClick={() => showToast('Custom OpenAI-compatible endpoints — coming with the backend')}>
-        + Add OpenAI-compatible endpoint (Ollama, OpenRouter, vLLM…)
-      </button>
     </div>
   )
 }
