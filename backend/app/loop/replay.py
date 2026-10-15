@@ -75,7 +75,9 @@ def as_prompt_expertise(e: LoopExpertise) -> ExpertiseIn:
 async def answer(client: anthropic.AsyncAnthropic, model_id: str, e: LoopExpertise, question: str) -> str:
     msg = await client.messages.create(
         model=model_id,
-        max_tokens=1500,
+        # Same settings as a chat answer, so the test reflects what users get.
+        max_tokens=settings.claude_max_output_tokens,
+        output_config={"effort": settings.claude_effort},
         system=build_system_prompt([as_prompt_expertise(e)]),
         messages=[{"role": "user", "content": question}],
     )
@@ -85,7 +87,8 @@ async def answer(client: anthropic.AsyncAnthropic, model_id: str, e: LoopExperti
 async def grade(client: anthropic.AsyncAnthropic, case: ReplayCase, text: str) -> tuple[bool | None, str]:
     msg = await client.messages.create(
         model=settings.loop_grader_model,
-        max_tokens=800,
+        max_tokens=settings.claude_max_output_tokens,
+        output_config={"effort": "low"},
         system=GRADE_SYSTEM,
         tools=[GRADE_TOOL],
         tool_choice={"type": "auto"},

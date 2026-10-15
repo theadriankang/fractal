@@ -7,6 +7,7 @@ lines: removals must match a line the Expertise really has, and the change must 
 
 import difflib
 import json
+import logging
 
 import anthropic
 
@@ -69,6 +70,8 @@ TOOL = {
     },
 }
 
+log = logging.getLogger(__name__)
+
 SYSTEM = """An operator in a commercial real estate team gave a 👎 to an AI answer and wrote a correction.
 The answer was grounded in the organisation's approved Expertise (shown with its sections and numbered steps).
 Turn the correction into the MINIMAL change to ONE Expertise, so a human reviewer can approve it.
@@ -120,14 +123,19 @@ def build_prompt(req: CorrectionRequest) -> str:
 async def call_model(req: CorrectionRequest, client: anthropic.AsyncAnthropic) -> dict | None:
     msg = await client.messages.create(
         model=settings.loop_correction_model,
-        max_tokens=2000,
+        # Thinking counts toward max_tokens; a low ceiling can end the reply before the tool call.
+        max_tokens=settings.claude_max_output_tokens,
+        output_config={"effort": "low"},
         system=SYSTEM,
         tools=[TOOL],
         # Newer Claude models reject forced tool_choice; "auto" + the system rule still yields a tool call.
         tool_choice={"type": "auto"},
         messages=[{"role": "user", "content": build_prompt(req)}],
     )
-    return next((b.input for b in msg.content if b.type == "tool_use"), None)
+    tool = next((b.input for b in msg.content if b.type == "tool_use"), None)
+    if tool is None:
+        log.warning("loop correction: no tool call (stop_reason=%s)", getattr(msg, "stop_reason", None))
+    return tool
 
 
 # ---------------------------------------------------------------- validation (pure)

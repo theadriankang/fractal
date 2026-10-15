@@ -40,12 +40,14 @@ Every rating now records the version it rated. The Expertise page shows the 👍
 |---|---|
 | Backend | `backend/app/loop/` (`schemas.py`, `correct.py`, `replay.py`), `backend/app/routers/loop.py`, settings in `config.py` |
 | Front end | `src/lib/feedbackLoop.js` (pure helpers), `src/components/FeedbackLoop.jsx` (Review Queue pieces), store actions `rateResponse` · `submitCorrection` · `runProposalTest` · `approveProposal` |
-| Database | `supabase/migrations/20261010150000_feedback_loop.sql`: version on feedback, proposal columns, `test_cases`, `test_runs` (used once governance moves server-side) |
-| Tests | `backend/tests/test_loop.py` (14 tests, Claude stubbed) · `npm run validate:loop` (10 checks) |
+| Persistence | `supabase/migrations/20261015120000_feedback_loop.sql`: `proposals.loop` (diagnosis, `set`, test question, reports, last test run) and `expertise.test_cases`. Routes: `POST /api/proposals` (with `loop`), `PATCH /api/proposals/{id}` (merge a report, save a test run), `PUT /api/expertise/{id}/test-cases`. Approval (`governance.apply_list_change`, `apply_set`, `add_test_case`) rewrites steps in place, applies `set` and saves the test question. |
+| Tests | `backend/tests/test_loop.py` (14 tests, Claude stubbed) · loop persistence in `backend/tests/test_persistence.py` (4 tests) · `npm run validate:loop` (10 checks) |
 
 **Stack:** React + Zustand · FastAPI · Claude Haiku (corrections, answers) + Claude Sonnet (grading) via the Anthropic SDK · Pydantic · Supabase Postgres. No new services.
 
-Like `/api/chat/stream`, both endpoints are **stateless** today: the browser sends the Expertise and keeps proposals, test questions and runs in its store. When Prompts 5 and 7 move governance into the database, the new tables take over.
+`/api/loop/correction` and `/api/loop/test` are stateless (the browser sends the Expertise versions). What they produce is saved like every other governance change: the proposal (with its `loop` metadata), merged reports, test runs and test questions are written to Supabase through the routes above, and survive a reload. A 👎 rating is sent with `propose: false`, so the server records the feedback without filing a second, plain proposal.
+
+Structured decision steps are sent to the loop endpoints as their `text`, so a step Claude proposes to replace matches the stored step on approval.
 
 ## Settings (`backend/.env`, all optional)
 ```
@@ -73,4 +75,4 @@ Optional: three quick 👎 on one Expertise → **Needs attention** appears in t
 ## Not built yet
 - Knowledge-gap radar and expert inbox (questions no Expertise could answer, routed to an expert)
 - Notifying the person whose correction was merged
-- Persisting proposals, test questions and runs in Supabase (waits for Prompts 5 + 7)
+- A history of every test run per proposal (only the latest run is kept, in `proposals.loop.testRun`)
