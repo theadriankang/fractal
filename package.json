@@ -9,7 +9,8 @@
     "validate:demo": "node scripts/validate-demo.mjs",
     "test:writing": "node scripts/test-writing.mjs",
     "preview": "vite preview",
-    "validate:ratings": "node scripts/validate-ratings.mjs"
+    "validate:ratings": "node scripts/validate-ratings.mjs",
+    "validate:loop": "node scripts/validate-feedback-loop.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

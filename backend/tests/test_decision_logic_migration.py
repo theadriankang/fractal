@@ -108,7 +108,8 @@ def test_apply_changes_mixed_shapes_add_and_remove_together():
     apply_changes(e, {
         "decisionLogic": {"add": [{"text": "New step.", "action": "do it"}], "remove": ["Old step."]},
     })
-    assert e.decision_logic == [{"text": "Keep.", "condition": "y"}, {"text": "New step.", "action": "do it"}]
+    # Removing and adding in one change rewrites the step in place (feedback loop), so order is kept.
+    assert e.decision_logic == [{"text": "New step.", "action": "do it"}, {"text": "Keep.", "condition": "y"}]
 
 
 def test_apply_changes_unaffected_field_untouched():

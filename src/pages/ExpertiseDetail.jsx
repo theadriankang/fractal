@@ -16,6 +16,7 @@ import { canEdit, contributeBlock, canGovern, reviewBlock, deleteBlock } from '.
 import { helpfulStats, fmtRate } from '../lib/ratings'
 import { readiness } from '../lib/readiness'
 import { itemKey, decisionStepText, isStructuredStep } from '../lib/decisionLogic'
+import { healthOf } from '../lib/feedbackLoop'
 
 const LIST_SECTIONS = [
   { key: 'knowledge', id: 'knowledge', title: 'Knowledge & heuristics', hint: 'What an expert knows that a newcomer doesn\'t. One per line.' },
@@ -239,6 +240,7 @@ function Versions({ e }) {
   const { rollbackExpertise, user } = useStore()
   const [open, setOpen] = useState(null)
   const versions = [...e.versions].reverse()
+  const { byVersion } = healthOf(e)
   if (!versions.length) return <p className="mt-3 text-sm text-gray-500">No approved versions yet. The first approval creates v1.0.</p>
   return (
     <div className="mt-4 border-l border-gray-200 pl-5 dark:border-gray-800">
@@ -250,6 +252,11 @@ function Versions({ e }) {
             <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
               <span className="font-mono text-sm font-medium">v{v.version}</span>
               <p className="min-w-0 flex-1 text-sm">{v.note}</p>
+              {byVersion[v.version] && (
+                <span className="text-xs text-gray-500" title="Ratings on answers that used this version">
+                  👍 {Math.round(byVersion[v.version].rate * 100)}% · {byVersion[v.version].rated} rating{byVersion[v.version].rated > 1 ? 's' : ''}
+                </span>
+              )}
               {!current && v.snapshot && (
                 <span className="flex gap-1">
                   <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setOpen(open === i ? null : i)}><GitCompare size={13} /> Compare</button>
@@ -653,6 +660,18 @@ export default function ExpertiseDetail() {
             {e.capture.reason && <span className="block text-xs opacity-80">Why: {e.capture.reason}</span>}
           </Callout>
         )}
+
+        {!editing && e.status === 'approved' && (() => {
+          const h = healthOf(e)
+          if (!h.flag && !h.rollbackTo) return null
+          return (
+            <Callout icon={AlertTriangle} tone="amber" title="Needs review">
+              {h.flag?.text || `v${e.version} is rated lower than v${h.rollbackTo.version}`}.
+              {h.rollbackTo && <> v{h.rollbackTo.version} scored {Math.round(h.rollbackTo.rate * 100)}% 👍 — a reviewer can roll back in Version history.</>}
+              {' '}<Link to="/expertise/review" className="underline">Review Queue →</Link>
+            </Callout>
+          )
+        })()}
 
         {e.status === 'draft' && <ReadinessChecklist e={view} />}
 

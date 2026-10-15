@@ -16,7 +16,8 @@ from ..governance import (
 from ..models import Expertise, ExpertiseVersion, Profile
 from ..retrieval.index import delete_embedding, index_expertise, search as retrieval_search
 from ..schemas import (
-    ApproveIn, ExpertiseCreate, ExpertiseMatchItem, ExpertiseMatchRequest, ExpertiseOut, ExpertisePatch, RollbackIn, UsageIn,
+    ApproveIn, ExpertiseCreate, ExpertiseMatchItem, ExpertiseMatchRequest, ExpertiseOut, ExpertisePatch, RollbackIn, TestCasesIn,
+    UsageIn,
 )
 
 router = APIRouter(prefix="/api", tags=["expertise"])
@@ -181,6 +182,19 @@ def record_usage(body: UsageIn, db: Session = Depends(get_db)):
     for e in db.query(Expertise).filter(Expertise.id.in_(body.ids)):
         e.usage_count = (e.usage_count or 0) + 1
     db.commit()
+
+
+@router.put("/expertise/{exp_id}/test-cases", response_model=ExpertiseOut)
+def save_test_cases(exp_id: str, body: TestCasesIn, user: Profile = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Feedback loop: saves the Expertise's test questions (a 👍 on a live answer adds one).
+    Any signed-in user may rate, so any signed-in user may add one; the list is capped at 20."""
+    e = db.get(Expertise, exp_id)
+    if not e:
+        raise HTTPException(status_code=404, detail="Expertise not found")
+    e.test_cases = [c for c in body.test_cases if isinstance(c, dict) and str(c.get("question") or "").strip()][:20]
+    db.commit()
+    db.refresh(e)
+    return one_expertise_out(db, e)
 
 
 # --- semantic match ----------------------------------------------------------

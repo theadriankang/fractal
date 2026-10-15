@@ -8,6 +8,7 @@ import { domainGradient } from '../data/taxonomy'
 import { Breadcrumb } from './ExpertiseLayout'
 import { StatusBadge, timeAgo } from '../components/ui'
 import { decisionStepText } from '../lib/decisionLogic'
+import { ChangeExtras, ChangeTest, CorrectionInfo, NeedsAttention, testBroke } from '../components/FeedbackLoop'
 
 // Where a captured item came from: the expert's own words + the extractor's confidence.
 function Provenance({ sources, capture }) {
@@ -64,7 +65,10 @@ function ProposalCard({ p }) {
             <span className="font-mono text-xs text-gray-500">v{e.version} → v{e.version.split('.')[0]}.{Number(e.version.split('.')[1] || 0) + 1}</span>
           </div>
           <p className="text-xs text-gray-500">{p.author} · {timeAgo(p.createdAt)}</p>
-          <p className="mt-2 flex items-start gap-1.5 text-sm text-gray-600 dark:text-gray-400"><MessageSquare size={14} className="mt-0.5 shrink-0" /> "{p.reason}"</p>
+          {p.origin === 'feedback'
+            ? <p className="mt-2 text-sm text-gray-600 dark:text-gray-400"><span className="text-gray-500">Why: </span>{p.reason}</p>
+            : <p className="mt-2 flex items-start gap-1.5 text-sm text-gray-600 dark:text-gray-400"><MessageSquare size={14} className="mt-0.5 shrink-0" /> "{p.reason}"</p>}
+          <CorrectionInfo p={p} e={e} />
           <div className="mt-3 space-y-2 rounded-xl bg-gray-50 p-3 font-mono text-[13px] dark:bg-gray-900">
             {Object.entries(p.changes).map(([field, { add = [], remove = [] }]) => (
               <div key={field}>
@@ -73,7 +77,9 @@ function ProposalCard({ p }) {
                 {add.map((a, i) => <p key={'a' + i} className="text-emerald-500">+ {decisionStepText(a)}</p>)}
               </div>
             ))}
+            <ChangeExtras p={p} e={e} />
           </div>
+          <ChangeTest p={p} e={e} />
           {p.capture && <Provenance sources={p.sources} capture={p.capture} />}
           {p.chatId && <Link to={`/c/${p.chatId}`} className="mt-2 inline-block text-xs text-accent-500 hover:underline">View source conversation →</Link>}
           {p.meetingTitle && <p className="mt-2 flex items-center gap-1.5 text-xs text-gray-500"><Mic size={12} /> From meeting: {p.meetingTitle} · <Link to="/meetings" className="text-accent-500 hover:underline">Meeting Recorder →</Link></p>}
@@ -81,7 +87,12 @@ function ProposalCard({ p }) {
         </div>
         <div className="flex shrink-0 gap-1.5">
           <button className="btn-outline" disabled={!!block} title={block || ''} onClick={() => rejectProposal(p.id)}><X size={15} /> Reject</button>
-          <button className="btn-accent" disabled={!!block} title={block || ''} onClick={() => approveProposal(p.id)}><Check size={15} /> Approve & merge</button>
+          {testBroke(p) ? (
+            <button className="btn-outline text-amber-600 ring-amber-500/40 dark:text-amber-400" disabled={!!block} title={block || 'The last test found answers this change makes worse'}
+              onClick={() => approveProposal(p.id)}><AlertTriangle size={15} /> Approve anyway</button>
+          ) : (
+            <button className="btn-accent" disabled={!!block} title={block || ''} onClick={() => approveProposal(p.id)}><Check size={15} /> Approve & merge</button>
+          )}
         </div>
       </div>
     </div>
@@ -176,6 +187,7 @@ export default function ReviewQueue() {
             Nothing reaches operational use without a human. New Expertise and every change to an existing one — from experts, corrections or 👎 feedback — waits here for a Reviewer.
           </p>
           <ScopeNotice />
+          <NeedsAttention />
           <Group title="Awaiting approval" desc="Submitted Expertise ready for a reviewer's decision." n={inReview.length}>
             {inReview.map((e) => <DraftCard key={e.id} e={e} />)}
           </Group>

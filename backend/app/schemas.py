@@ -263,6 +263,7 @@ class ExpertiseOut(CamelModel):
     escalation: list[str] = Field(default_factory=list)
     sources: list[dict] = Field(default_factory=list)
     feedback: list[dict] = Field(default_factory=list)
+    test_cases: list[dict] = Field(default_factory=list)
     origin: Optional[str] = None
     capture: Optional[dict] = None
     author_id: Optional[str] = None
@@ -290,6 +291,19 @@ class ProposalCreate(CamelModel):
     sources: list[dict] = Field(default_factory=list)
     meeting_id: Optional[str] = None
     meeting_title: Optional[str] = None
+    # Feedback-loop metadata (diagnosis, set, testCase, reports, testRun…); null for other proposals.
+    loop: Optional[dict] = None
+
+
+class ProposalUpdate(CamelModel):
+    """PATCH /api/proposals/{id}: a second 👎 report merged in, or a before/after test run saved."""
+    changes: Optional[dict] = None
+    reason: Optional[str] = None
+    loop: Optional[dict] = None
+
+
+class TestCasesIn(CamelModel):
+    test_cases: list[dict] = Field(default_factory=list, max_length=20)
 
 
 class ProposalOut(ProposalCreate):
@@ -321,6 +335,9 @@ class RatingIn(CamelModel):
     # person per answer, so a new rating replaces theirs and `rating: null` takes it back.
     author_id: Optional[str] = None
     response_key: Optional[str] = None
+    # False when the browser files the 👎 correction itself through the feedback loop
+    # (POST /api/loop/correction → POST /api/proposals), so no plain "add to knowledge" proposal is made.
+    propose: bool = True
 
 
 class RatingOut(CamelModel):

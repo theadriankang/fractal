@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     # transcript, and having the front end call it instead of (or as a fallback for) SpeechRecognition.
     transcribe: str = "browser"  # "browser" | "tencent-asr" | "whisper"
 
+    # Feedback loop (docs/FEEDBACK_LOOP.md): 👎 corrections -> proposals, before/after tests
+    loop_correction_model: str = "claude-haiku-5-5"
+    loop_grader_model: str = "claude-sonnet-5-5"
+    loop_answer_model: str = "claude-haiku"  # front-end id; a test run uses the chat's model when given
+    loop_threshold: float = 0.6  # below this confidence a correction proposes nothing
+    loop_max_cases: int = 8
+    loop_concurrency: int = 4
+
     # CORS (env: CORS_ORIGINS='["https://fractal.vercel.app"]' or a comma-separated list)
     cors_origins: list[str] = ["http://localhost:5173"]
 

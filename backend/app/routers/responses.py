@@ -2,7 +2,8 @@
 
 A rating is saved on the response and as Feedback on every Expertise the answer used — one per
 person per answer: rating again replaces it, `rating: null` takes it back. A 👎 with a comment from an expert in that domain becomes an
-open proposal adding the comment to `knowledge`.
+open proposal adding the comment to `knowledge` — unless `propose` is false, when the browser files it
+through the feedback loop instead (POST /api/loop/correction, then POST /api/proposals).
 """
 
 import uuid
@@ -56,7 +57,7 @@ def rate_response(
 
     if body.rating and used:
         target = used.get(ids[0])
-        if body.rating == "down" and body.comment.strip() and target:
+        if body.rating == "down" and body.comment.strip() and target and body.propose:
             try:
                 require_contributor(user, target.domain)
             except HTTPException as blocked:

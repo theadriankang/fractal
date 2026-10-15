@@ -5,7 +5,9 @@ snapshots, serialisation to the front-end shape, and audit rows.
 """
 
 import re
+import uuid
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -118,6 +120,7 @@ def exp_to_out(e: Expertise, versions: list[ExpertiseVersion], feedback_rows: li
         feedback=feedback_list(e, feedback_rows),
         origin=e.origin,
         capture=e.capture,
+        test_cases=e.test_cases or [],
         author_id=e.author_id,
         created_at=e.created_at,
         updated_at=e.updated_at,
@@ -152,7 +155,7 @@ def proposal_to_out(p: Proposal) -> ProposalOut:
         id=p.id, expertise_id=p.expertise_id, type=p.type, created_at=p.created_at,
         author=p.author, author_id=p.author_id, reason=p.reason, changes=p.changes or {},
         chat_id=p.chat_id, status=p.status, capture=p.capture, sources=p.sources or [],
-        meeting_id=p.meeting_id, meeting_title=p.meeting_title,
+        meeting_id=p.meeting_id, meeting_title=p.meeting_title, loop=p.loop,
     )
 
 
@@ -178,11 +181,54 @@ def apply_changes(e: Expertise, changes: dict) -> None:
         attr = LIST_FIELDS.get(field)
         if not attr:
             continue
-        remove_keys = {_item_key(x) for x in (diff.get("remove") or [])}
-        current = [x for x in (getattr(e, attr) or []) if _item_key(x) not in remove_keys]
-        current_keys = {_item_key(x) for x in current}
-        addition = [x for x in diff.get("add") or [] if _item_key(x) not in current_keys]
-        setattr(e, attr, current + addition)
+        setattr(e, attr, apply_list_change(getattr(e, attr) or [], diff))
+
+
+def apply_list_change(items: list, diff: dict) -> list:
+    """One field's diff, mirroring applyListChange in src/lib/feedbackLoop.js: when a change both
+    removes and adds lines, the new lines take the place of the first removed one (a step rewritten
+    in place keeps its position); ``insertAfter`` (index of the step new lines follow, -1 = first)
+    positions pure additions; otherwise additions go at the end. Duplicates are never added."""
+    remove_keys = {_item_key(x) for x in (diff.get("remove") or [])}
+    existing = {_item_key(x) for x in items}
+    fresh = [x for x in (diff.get("add") or []) if _item_key(x) not in existing or _item_key(x) in remove_keys]
+    first_removed = next((i for i, x in enumerate(items) if _item_key(x) in remove_keys), -1)
+    kept = [x for x in items if _item_key(x) not in remove_keys]
+    if first_removed >= 0 and fresh:
+        before = [x for x in items[:first_removed] if _item_key(x) not in remove_keys]
+        return before + fresh + kept[len(before):]
+    insert_after = diff.get("insertAfter")
+    if insert_after is None:
+        return kept + fresh
+    anchor = items[insert_after] if isinstance(insert_after, int) and 0 <= insert_after < len(items) else None
+    if anchor is None:
+        at = 0 if insert_after == -1 else len(kept)
+    else:
+        at = next((i + 1 for i, x in enumerate(kept) if _item_key(x) == _item_key(anchor)), len(kept))
+    return kept[:at] + fresh + kept[at:]
+
+
+# String fields a feedback-loop proposal may replace outright (loop.set), e.g. a narrowed "When to use".
+SETTABLE_FIELDS = {"whenToUse": "when_to_use", "summary": "summary"}
+
+
+def apply_set(e: Expertise, values: dict | None) -> None:
+    for field, value in (values or {}).items():
+        attr = SETTABLE_FIELDS.get(field)
+        if attr and isinstance(value, str) and value.strip():
+            setattr(e, attr, value.strip())
+
+
+def add_test_case(e: Expertise, case: dict | None, cap: int = 20) -> None:
+    """Saves a proposal's test question on the Expertise (newest first, no exact duplicates)."""
+    if not case or not str(case.get("question") or "").strip():
+        return
+    current = list(e.test_cases or [])
+    if any(c.get("question") == case["question"] and c.get("source") == "correction" for c in current):
+        return
+    entry = {**case, "source": "correction", "id": case.get("id") or f"case-{uuid.uuid4().hex[:8]}",
+             "createdAt": case.get("createdAt") or datetime.now(timezone.utc).isoformat()}
+    e.test_cases = [entry, *current][:cap]
 
 
 # --- audit -------------------------------------------------------------------

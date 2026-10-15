@@ -162,6 +162,25 @@ export async function matchExpertiseBackend(query, attachedIds = [], limit = 3) 
   }
 }
 
+async function postJSON(path, body, timeoutMs) {
+  if (USE_MOCK) throw new Error('Mock mode')
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await apiFetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : `Backend error (${res.status}).`)
+    return data
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /**
  * POST /api/expertise/weigh — weigh every relevant domain's approved Expertise against one
  * question: each expert's view, where they agree, where one domain's idea runs into another's
@@ -205,6 +224,19 @@ export async function routeAutoBackend(prompt) {
   } catch {
     return null
   }
+}
+
+/**
+ * Feedback loop (src/lib/feedbackLoop.js): a 👎 correction → a precise change to one Expertise.
+ * Rejects when the backend is offline or errors, so callers can fall back to offline rules.
+ */
+export async function proposeFix(body, { timeoutMs = 30000 } = {}) {
+  return { ...(await postJSON('/api/loop/correction', body, timeoutMs)), engine: 'ai' }
+}
+
+/** Feedback loop: re-ask saved questions with the current and the proposed Expertise, graded blind. */
+export async function runChangeTest(body, { timeoutMs = 180000 } = {}) {
+  return { ...(await postJSON('/api/loop/test', body, timeoutMs)), engine: 'ai' }
 }
 
 // The Expertise fields the backend's system prompt uses.
@@ -326,6 +358,18 @@ async function request(user, method, path, body, _retried = false) {
 // Fields an edit may change; status, version, feedback and usage change only through the actions below.
 const EDITABLE = ['name', 'domain', 'topic', 'assetTypes', 'related', 'owner', 'ownerRole', 'keywords', 'summary', 'whenToUse',
   'knowledge', 'decisionLogic', 'guardrails', 'escalation', 'sources', 'origin']
+// Feedback-loop fields travel in the proposal's `loop` column (backend/app/models.py) and are
+// flattened back onto the proposal in the browser, where src/lib/feedbackLoop.js reads them.
+const LOOP_KEYS = ['origin', 'diagnosis', 'confidence', 'engine', 'set', 'baseVersion', 'reportCount', 'reports', 'testCase', 'testRun']
+function toApiProposal(p) {
+  const out = {}
+  const loop = {}
+  for (const [k, v] of Object.entries(p)) {
+    if (LOOP_KEYS.includes(k)) { if (v !== undefined) loop[k] = v } else out[k] = v
+  }
+  return Object.keys(loop).length ? { ...out, loop } : out
+}
+const fromApiProposal = ({ loop, ...p }) => ({ ...p, ...(loop || {}) })
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
 const enc = encodeURIComponent
 
@@ -365,10 +409,14 @@ export function apiFor(user) {
     // action: submit | approve | reject | deprecate | restore | rollback
     expertiseAction: (id, action, body) => call('POST', `/expertise/${enc(id)}/${action}`, body),
 
-    listProposals: () => call('GET', '/proposals'),
-    createProposal: (p) => call('POST', '/proposals', p),
+    listProposals: () => call('GET', '/proposals').then((list) => list.map(fromApiProposal)),
+    createProposal: (p) => call('POST', '/proposals', toApiProposal(p)).then(fromApiProposal),
+    // Feedback loop: merge a second 👎 report, or save a before/after test run.
+    updateProposal: (id, patch) => call('PATCH', `/proposals/${enc(id)}`, toApiProposal(patch)).then(fromApiProposal),
     // action: approve (returns the updated Expertise) | reject
     proposalAction: (id, action) => call('POST', `/proposals/${enc(id)}/${action}`),
+    // Feedback loop: the Expertise's saved test questions (a 👍 on a live answer adds one).
+    saveTestCases: (id, testCases) => call('PUT', `/expertise/${enc(id)}/test-cases`, { testCases }),
 
     listAudit: (params = {}) => {
       const qs = new URLSearchParams()
