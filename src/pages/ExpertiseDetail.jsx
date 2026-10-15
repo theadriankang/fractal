@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Pencil, Save, Send, Check, Archive, Download, MessageSquarePlus, RotateCcw, GitCompare, FileText, MessagesSquare, Mic,
   Link2, ThumbsUp, ThumbsDown, Trash2, ChevronDown, ChevronLeft, ChevronRight, Copy, ShieldCheck, Info, AlertTriangle, Mail,
-  ClipboardList, Plus, X, RotateCw, GitPullRequestArrow, Eye,
+  ClipboardList, Plus, X, RotateCw, GitPullRequestArrow, Eye, CornerDownRight,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { USE_MOCK, apiFor } from '../lib/api'
@@ -109,6 +109,54 @@ function H2({ id, children, count }) {
       <a href={`#${id}`} className="hover:underline-offset-4">{children}</a>
       {count != null && <span className="text-sm font-normal text-gray-400">{count}</span>}
     </h2>
+  )
+}
+
+// Decision logic rendered as a branching flow, not a flat list: each step is a node
+// (If / Then / Because) connected to the next by a vertical rail, with escalateIf broken
+// out as a visually distinct side-branch rather than buried in a definition list. Makes
+// the actual thought process -- the sequence of checks and the point at which a human
+// must take over -- legible at a glance, which a flat numbered list doesn't convey.
+function DecisionFlow({ items }) {
+  if (!items.length) return <p className="mt-3 text-sm italic text-gray-500">Nothing captured yet.</p>
+  return (
+    <ol className="mt-4">
+      {items.map((x, i) => {
+        const structured = isStructuredStep(x)
+        const isLast = i === items.length - 1
+        return (
+          <li key={i} className="relative flex gap-4">
+            <div className="flex flex-col items-center">
+              <span className="z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white dark:bg-indigo-500">
+                {i + 1}
+              </span>
+              {!isLast && <span className="my-1 w-px flex-1 bg-gray-200 dark:bg-gray-800" />}
+            </div>
+            <div className={`flex-1 ${isLast ? 'pb-1' : 'pb-6'}`}>
+              <div className="rounded-xl border border-gray-200 bg-white p-3.5 dark:border-gray-800 dark:bg-gray-900">
+                {structured && x.condition && (
+                  <p className="mb-1.5 inline-flex rounded-md bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    If {x.condition}
+                  </p>
+                )}
+                <p className="text-[15px] leading-relaxed text-gray-800 dark:text-gray-200">
+                  {structured ? (x.action || x.text) : decisionStepText(x)}
+                </p>
+                {structured && x.reasoning && (
+                  <p className="mt-1.5 text-[13px] italic text-gray-500 dark:text-gray-400">Because {x.reasoning}</p>
+                )}
+              </div>
+              {structured && x.escalateIf && (
+                <div className="ml-6 mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+                  <CornerDownRight size={14} className="mt-0.5 shrink-0" />
+                  <span><span className="font-medium">Escalate if</span> {x.escalateIf}</span>
+                </div>
+              )}
+            </div>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
@@ -708,6 +756,8 @@ export default function ExpertiseDetail() {
                   <textarea rows={Math.max(3, draft[s.key].length + 1)} className="input resize-y leading-relaxed" defaultValue={draft[s.key].map(decisionStepText).join('\n')} onBlur={(ev) => setList(s.key, ev.target.value)} />
                 )}
               </>
+            ) : s.key === 'decisionLogic' ? (
+              <DecisionFlow items={e[s.key]} />
             ) : (
               <ListView items={e[s.key]} ordered={s.ordered} tone={s.tone} />
             )}
