@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Sparkles } from 'lucide-react'
+import { X, Sparkles, Users } from 'lucide-react'
 import { getProvider } from '../data/models'
 import { STATUSES } from '../data/expertise'
 
@@ -40,6 +40,47 @@ export function ProviderIcon({ providerId, size = 20, auto = false }) {
 export function StatusBadge({ status }) {
   const s = STATUSES[status]
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${s.cls}`}>{s.label}</span>
+}
+
+// A soft, proportional note for a domain card: how many of its topics rely
+// on a single contributor, out of how many have anything captured. Never a
+// single verdict for the whole domain -- a domain with one thin topic and
+// several well-covered ones reads as "1 of 4", not as the whole domain
+// being shaky. `coverage` is domainContributorCoverage()'s return value;
+// renders nothing when nothing is flagged.
+export function ContributorCoverageNote({ coverage }) {
+  if (!coverage) return null
+  const cls = coverage.level === 'high' ? 'text-red-500 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
+  const dotCls = coverage.level === 'high' ? 'bg-red-500' : 'bg-amber-500'
+  const title = `Topics relying on one contributor: ${coverage.flaggedNames.join(', ')}. This reflects who has documented knowledge so far, not who the real experts are.`
+  return (
+    <span title={title} className={`mt-2 flex items-center gap-1.5 text-[11px] ${cls}`}>
+      <span className={`h-[5px] w-[5px] shrink-0 rounded-full ${dotCls}`} />
+      {coverage.flaggedTopics} of {coverage.totalTopics} topics need more contributors
+    </span>
+  )
+}
+
+// The precise, topic-level signal: who has actually touched this topic's
+// captured Expertise (author + anyone who proposed a revision). `coverage`
+// is topicCoverage()'s return value; renders nothing with nothing captured.
+export function TopicContributorBadge({ coverage }) {
+  if (!coverage) return null
+  if (coverage.singleContributor) {
+    return (
+      <span
+        title={`All ${coverage.total} captured here trace back to ${coverage.contributor}. If they're unavailable, nobody else has touched this topic yet.`}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-600 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/25"
+      >
+        <span className="h-[5px] w-[5px] rounded-full bg-amber-500" /> Single contributor
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+      <Users size={11} /> {coverage.distinctContributors} contributors
+    </span>
+  )
 }
 
 export function useClickOutside(onOutside) {

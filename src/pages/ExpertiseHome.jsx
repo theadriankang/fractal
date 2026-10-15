@@ -1,11 +1,12 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { BookOpenCheck, TrendingUp, ShieldCheck, Users, ArrowRight, Plus, Sparkles, Clock, Flame } from 'lucide-react'
+import { BookOpenCheck, TrendingUp, ShieldCheck, Users, ArrowRight, Plus, Sparkles, Clock, Flame, Info } from 'lucide-react'
 import { useStore } from '../store'
 import { canContribute, contributeBlock } from '../lib/permissions'
 import { TAXONOMY, buildTree, slugify, domainBySlug } from '../data/taxonomy'
-import { StatusBadge, timeAgo } from '../components/ui'
+import { StatusBadge, ContributorCoverageNote, TopicContributorBadge, timeAgo } from '../components/ui'
 import { Breadcrumb } from './ExpertiseLayout'
 import { averageHelpful, fmtRate } from '../lib/ratings'
+import { domainContributorCoverage, topicCoverage } from '../lib/ownershipRisk'
 
 function Stat({ icon: Icon, label, value }) {
   return (
@@ -29,7 +30,7 @@ function Row({ e, meta }) {
 }
 
 export default function ExpertiseHome() {
-  const { expertise } = useStore()
+  const { expertise, proposals } = useStore()
   const tree = buildTree(expertise)
   const approved = expertise.filter((e) => e.status === 'approved')
   const uses = expertise.reduce((a, e) => a + e.usageCount, 0)
@@ -58,7 +59,9 @@ export default function ExpertiseHome() {
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {tree.map((d) => {
           const Icon = d.icon
-          const live = d.topics.flatMap((t) => t.items).filter((e) => e.status === 'approved').length
+          const items = d.topics.flatMap((t) => t.items)
+          const live = items.filter((e) => e.status === 'approved').length
+          const coverage = domainContributorCoverage(d.topics, proposals)
           return (
             <Link key={d.domain} to={`/expertise/d/${slugify(d.domain)}`} className="card group flex flex-col p-4 transition hover:-translate-y-0.5 hover:shadow-lg dark:hover:ring-gray-700">
               <div className="flex items-center justify-between">
@@ -75,6 +78,7 @@ export default function ExpertiseHome() {
               <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-gray-800">
                 {live} live · {d.count - live} in progress · {d.topics.length} topics
               </p>
+              <ContributorCoverageNote coverage={coverage} />
             </Link>
           )
         })}
@@ -97,12 +101,13 @@ export default function ExpertiseHome() {
 export function ExpertiseDomain() {
   const { slug } = useParams()
   const navigate = useNavigate()
-  const { expertise, createExpertise, user } = useStore()
+  const { expertise, proposals, createExpertise, user } = useStore()
   const meta = domainBySlug(slug)
   if (!meta) return <p className="p-16 text-center text-gray-500">Domain not found.</p>
   const d = buildTree(expertise).find((x) => x.domain === meta.domain)
   const Icon = d.icon
   const add = (topic) => navigate(`/expertise/${createExpertise({ domain: d.domain, topic, name: `New ${topic} Expertise` })}?edit=1`)
+  const coverage = domainContributorCoverage(d.topics, proposals)
 
   return (
     <div className="mx-auto max-w-4xl px-8 pb-20 pt-8">
@@ -112,6 +117,15 @@ export function ExpertiseDomain() {
         <h1 className="text-3xl font-semibold tracking-tight">{d.domain}</h1>
       </div>
       <p className="mt-3 text-[15px] text-gray-600 dark:text-gray-400">{d.description}</p>
+
+      {coverage && (
+        <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs leading-relaxed text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
+          <Info size={14} className="mt-0.5 shrink-0 text-gray-400" />
+          <span>
+            "Contributors" counts anyone who authored or proposed a revision to an entry — not just who wrote the first draft. {coverage.flaggedTopics} of {coverage.totalTopics} topics here trace back to one person so far: {coverage.flaggedNames.join(', ')}. This reflects what's been documented in Fractal, not who the real experts are.
+          </span>
+        </div>
+      )}
 
       {/* topic jump list */}
       <div className="mt-5 flex flex-wrap gap-1.5">
@@ -124,9 +138,12 @@ export function ExpertiseDomain() {
 
       {d.topics.map((t) => (
         <section key={t.name} id={`topic-${slugify(t.name)}`} className="mt-10 scroll-mt-6">
-          <div className="flex items-center justify-between border-b border-gray-100 pb-2 dark:border-gray-800">
-            <h2 className="text-xl font-semibold">{t.name}</h2>
-            <button className="btn-ghost text-xs" disabled={!canContribute(user, d.domain)} title={contributeBlock(user, d.domain) || ''} onClick={() => add(t.name)}><Plus size={14} /> Add</button>
+          <div className="flex items-center justify-between gap-3 border-b border-gray-100 pb-2 dark:border-gray-800">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <h2 className="text-xl font-semibold">{t.name}</h2>
+              <TopicContributorBadge coverage={topicCoverage(t.items, proposals)} />
+            </div>
+            <button className="btn-ghost shrink-0 text-xs" disabled={!canContribute(user, d.domain)} title={contributeBlock(user, d.domain) || ''} onClick={() => add(t.name)}><Plus size={14} /> Add</button>
           </div>
           {t.items.length ? (
             <div className="mt-2 divide-y divide-gray-100 dark:divide-gray-850">
