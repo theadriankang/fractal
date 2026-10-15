@@ -72,8 +72,12 @@ try {
     for (const [field, { add, remove }] of Object.entries(p.changes)) {
       assert(['knowledge', 'decisionLogic', 'guardrails', 'escalation'].includes(field))
       assert(add.length || remove.length)
-      for (const item of remove) assert(target[field].some((x) => itemKey(x) === itemKey(item)), p.id + ': removal does not match target')
-      for (const item of add) assert(!target[field].includes(item), p.id + ': addition already exists')
+      // decisionLogic entries may be plain strings or structured { text, ... } steps (see
+      // src/lib/decisionLogic.js) -- compare by stable identity (itemKey), not raw equality,
+      // the same way src/store.js diffs proposal changes against the live Expertise.
+      const targetKeys = new Set((target[field] || []).map(itemKey))
+      for (const item of remove) assert(targetKeys.has(itemKey(item)), p.id + ': removal does not match target')
+      for (const item of add) assert(!targetKeys.has(itemKey(item)), p.id + ': addition already exists')
     }
   }
 
@@ -119,9 +123,11 @@ try {
   localStorage.setItem('fractal-store', JSON.stringify({ version: 2, state: {
     expertise: oldEntries,
     proposals: [proposals[0]],
-    chats: [{ id: 'saved-chat', messages: [] }],
+    // onRehydrateStorage prunes chats with no messages (left over from before "New Chat" stopped
+    // pre-creating an entry) -- give this fixture a message so it survives rehydrate like a real chat would.
+    chats: [{ id: 'saved-chat', messages: [{ id: 'm1', role: 'user', content: 'hi', createdAt: new Date().toISOString() }] }],
     settings: { ...useStore.getState().settings, theme: 'light' },
-    user: useStore.getState().user,
+    session: useStore.getState().session,
     selectedModels: ['claude-sonnet'],
   } }))
   await useStore.persist.rehydrate()

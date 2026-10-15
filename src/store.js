@@ -218,8 +218,9 @@ function checkForConflict(get, chatId, msgId, question, attachedIds) {
     .catch(() => patchMsg((m) => ({ ...m, weighCheck: null })))
 }
 
+// Per-provider enable/disable only — API keys live server-side (backend/.env), never in the browser.
 const defaultConnections = Object.fromEntries(
-  PROVIDERS.map((p) => [p.id, { enabled: true, apiKey: '', baseUrl: '' }]),
+  PROVIDERS.map((p) => [p.id, { enabled: true }]),
 )
 
 export const useStore = create(
