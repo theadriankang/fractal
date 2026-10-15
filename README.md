@@ -68,6 +68,7 @@ Organised as **Domain → Topic → Expertise** (taxonomy in `src/data/taxonomy.
 ### Review Queue
 - Submitted Expertise awaiting approval, proposed revisions (with diff), and drafts.
 - **Roles** (switch in the user menu): *Contributor* can capture/edit/submit; *Reviewer* approves, rejects, deprecates, rolls back.
+- **Knowledge gaps** tab — questions no approved Expertise could answer (no match, or best score below 0.50), merged by topic and sorted by how many people asked. Experts see their domains first; **Capture this** starts a draft pre-filled with the question, and approving that draft closes the gap. **Re-check** closes it if approved Expertise now covers it; the Reviewer or a domain expert can dismiss off-topic ones. Backend: `/api/gaps` (`backend/app/gaps.py`).
 
 ### Writing Assistant
 - Open **Writing Assistant** in the sidebar, or **Summarize / draft email** on an approved Expertise page to preselect that reference.
@@ -98,6 +99,7 @@ Check the frontend service with `npm run test:writing`. Run backend checks from
 7. Back in chat, 👎 an answer with a correction (e.g. *"Step 2 is out of date — we check the VSD fault log first"*) → the Review Queue shows a diagnosed **proposed revision** that rewrites that step in place → **Test change** compares old vs new answers on saved questions → approve → *learns through governed feedback* (see `docs/FEEDBACK_LOOP.md`).
 8. **Compare** Claude vs GPT vs Hunyuan on the same prompt — same Expertise, any model → *portable*.
 9. Ask *"Should we pre-cool Tower A from 7:00 on Mondays to cut the peak demand charge, even though the Level 23 tenant keeps complaining it's too warm?"* → under the answer, **Experts weighed together** shows Energy, Tenant Experience and Technical Services, the conflict, how to reconcile it, and who to loop in → *coordinates across domains, humans decide*. A plain question ("How do I triage a chiller alarm?") gets no weighing.
+10. Ask something nothing covers, e.g. *"How do we troubleshoot the VRF system on level 12?"* → the answer notes it was **logged as a knowledge gap** for Technical Services → **Review Queue → Knowledge gaps** shows it with how many people asked → **Capture this** → finish and approve the draft → the gap shows **Answered** → *it gets smarter by telling you what it doesn't know yet*.
 
 ---
 

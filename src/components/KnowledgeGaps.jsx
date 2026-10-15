@@ -34,7 +34,7 @@ function GapCard({ g }) {
 
   return (
     <div className={`card p-4 ${closed ? 'opacity-70' : ''}`}>
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-3 sm:flex-nowrap">
         <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white ${g.domain ? `bg-gradient-to-br ${domainGradient(g.domain)}` : 'bg-gray-400 dark:bg-gray-600'}`}>
           <CircleHelp size={17} />
         </span>
@@ -81,7 +81,7 @@ function GapCard({ g }) {
           )}
         </div>
         {!closed && (
-          <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+          <div className="flex w-full shrink-0 flex-wrap justify-end gap-1.5 sm:w-auto">
             {mayDismiss && (
               <button className="btn-outline" title="Not something to capture (off-topic, one-off, vendor's problem)" onClick={() => dismissGap(g.id)}>
                 <X size={15} />
@@ -116,6 +116,8 @@ export default function KnowledgeGaps() {
   const mine = isReviewer(user) ? active : active.filter((g) => g.domain && user.domains.includes(g.domain))
   const rest = active.filter((g) => !mine.includes(g))
   const totalAsks = active.reduce((n, g) => n + g.askCount, 0)
+  const openCount = active.filter((g) => g.status === 'open').length
+  const drafting = active.length - openCount
 
   const List = ({ title, desc, items }) => (
     <section className="mt-8">
@@ -131,7 +133,7 @@ export default function KnowledgeGaps() {
     <div>
       <p className="mt-4 text-sm text-gray-500">
         Questions people asked that no approved Expertise could answer, most-asked first. This is what to capture next.
-        {active.length > 0 && <> <span className="font-medium text-gray-700 dark:text-gray-300">{active.length} open gap{active.length > 1 ? 's' : ''}, asked {totalAsks} times.</span></>}
+        {active.length > 0 && <> <span className="font-medium text-gray-700 dark:text-gray-300">{openCount} open{drafting ? `, ${drafting} being captured` : ''} · asked {totalAsks} times in all.</span></>}
       </p>
       {loading && !gaps.length ? (
         <p className="mt-8 flex items-center justify-center gap-2 text-sm text-gray-500"><Loader2 size={15} className="animate-spin" /> Loading knowledge gaps…</p>
