@@ -144,7 +144,7 @@ async def stream_reply(
         # OpenAI-compatible Hunyuan endpoint.
         model_name = entry.hunyuan_model or entry.model
         kwargs = dict(
-            model=model_name,
+            model=f"openai/{model_name}",
             messages=[{"role": "system", "content": system}, *messages],
             api_key=settings.hunyuan_api_key,
             api_base=settings.hunyuan_base_url,
