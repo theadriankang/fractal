@@ -11,7 +11,8 @@ What it does, in order:
    capture flow, or chats started by a demo account).
 3. Deletes ExpertiseVersion rows for seeded Expertise that aren't one of
    the seed's own versions (extra versions left over from a test
-   approve/rollback), and Feedback + audit_log rows entirely, so the
+   approve/rollback), and Feedback + audit_log rows and saved feedback-loop
+   test questions entirely, so the
    Review Queue, Audit Log and ratings start empty.
 4. Rebuilds the pgvector index for approved Expertise, since step 2/3
    can change which Expertise is approved.
@@ -116,9 +117,11 @@ def main():
                 trimmed += 1
         n_feedback = db.query(Feedback).delete()
         n_audit = db.query(AuditLog).delete()
+        # Feedback loop: saved test questions come from 👍 answers and approved corrections.
+        n_cases = db.query(Expertise).update({Expertise.test_cases: []}, synchronize_session=False)
         db.commit()
         print(f"Trimmed {trimmed} extra Expertise versions, cleared {n_feedback} feedback rows, "
-              f"{n_audit} audit log rows.")
+              f"{n_audit} audit log rows, test questions reset on {n_cases} Expertise.")
 
         # 4. Rebuild the retrieval index for whatever is approved now.
         print("Rebuilding Expertise search index...")
