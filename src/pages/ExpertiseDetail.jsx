@@ -3,10 +3,10 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Pencil, Save, Send, Check, Archive, Download, MessageSquarePlus, RotateCcw, GitCompare, FileText, MessagesSquare, Mic,
   Link2, ThumbsUp, ThumbsDown, Trash2, ChevronDown, ChevronLeft, ChevronRight, Copy, ShieldCheck, Info, AlertTriangle, Mail,
-  ClipboardList, Plus, X, RotateCw, GitPullRequestArrow, Eye, CornerDownRight,
+  ClipboardList, Plus, X, RotateCw, GitPullRequestArrow, Eye, CornerDownRight, ImagePlus, Image as ImageIcon,
 } from 'lucide-react'
 import { useStore } from '../store'
-import { USE_MOCK, apiFor } from '../lib/api'
+import { USE_MOCK, apiFor, uploadFile, fileUrl } from '../lib/api'
 import { isIntern } from '../lib/permissions'
 import { CONTENT_FIELDS } from '../data/expertise'
 import { TAXONOMY, ASSET_TYPES, domainMeta, slugify, flatOrder } from '../data/taxonomy'
@@ -390,25 +390,84 @@ function Activity({ e }) {
   )
 }
 
-const SOURCE_ICON = { conversation: MessagesSquare, interview: Mic, meeting: Mic, document: FileText }
-function Sources({ e }) {
-  if (!e.sources.length) return <p className="mt-3 text-sm text-gray-500">No linked sources.</p>
+const SOURCE_ICON = { conversation: MessagesSquare, interview: Mic, meeting: Mic, document: FileText, photo: ImageIcon }
+
+// A photo a contributor attached as evidence for a judgement call that's hard to put
+// into words -- "this is what a seized damper looks like", "this crack is cosmetic" --
+// shown as a thumbnail (click for full size) instead of the text-source treatment,
+// since the point IS the image, not an excerpt of it.
+function PhotoSource({ s }) {
   return (
-    <div className="mt-4 space-y-2">
-      {e.sources.map((s, i) => {
-        const Icon = SOURCE_ICON[s.type] || Link2
-        const inner = (
-          <div className="flex gap-3 rounded-xl p-3 ring-1 ring-gray-200 transition hover:bg-gray-50 dark:ring-gray-800 dark:hover:bg-gray-850">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-500 dark:bg-gray-800"><Icon size={16} /></span>
-            <div>
-              <p className="text-sm font-medium">{s.title}</p>
-              <p className="text-xs capitalize text-gray-500">{s.type} · {fmtDate(s.date)}</p>
-              <p className="mt-1 text-sm italic text-gray-600 dark:text-gray-400">"{s.excerpt}"</p>
-            </div>
-          </div>
-        )
-        return s.chatId ? <Link key={i} to={`/c/${s.chatId}`} className="block">{inner}</Link> : <div key={i}>{inner}</div>
-      })}
+    <a
+      href={fileUrl(s.fileId)}
+      target="_blank"
+      rel="noreferrer"
+      className="flex gap-3 rounded-xl p-3 ring-1 ring-gray-200 transition hover:bg-gray-50 dark:ring-gray-800 dark:hover:bg-gray-850"
+    >
+      <img src={fileUrl(s.fileId)} alt={s.title} className="h-16 w-16 shrink-0 rounded-lg object-cover ring-1 ring-gray-200 dark:ring-gray-800" />
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium">{s.title}</p>
+        <p className="text-xs text-gray-500">Photo evidence · {fmtDate(s.date)}</p>
+        {s.excerpt && <p className="mt-1 text-sm italic text-gray-600 dark:text-gray-400">"{s.excerpt}"</p>}
+      </div>
+    </a>
+  )
+}
+
+function Sources({ e, user, updateExpertise, showToast }) {
+  const [uploading, setUploading] = useState(false)
+  const canAdd = canEdit(user, e)
+
+  async function handleFile(ev) {
+    const file = ev.target.files?.[0]
+    ev.target.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      showToast?.('Please choose an image file (PNG or JPG).')
+      return
+    }
+    setUploading(true)
+    try {
+      const meta = await uploadFile(file)
+      const source = { type: 'photo', title: file.name, fileId: meta.id, mediaType: meta.mediaType, date: new Date().toISOString() }
+      updateExpertise(e.id, { sources: [...e.sources, source] })
+      showToast?.('Photo evidence added.')
+    } catch (err) {
+      showToast?.(err.message || 'Upload failed.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="mt-4">
+      {canAdd && (
+        <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-850 ${uploading ? 'pointer-events-none opacity-60' : ''}`}>
+          <ImagePlus size={13} /> {uploading ? 'Uploading…' : 'Add photo evidence'}
+          <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleFile} />
+        </label>
+      )}
+      {!e.sources.length ? (
+        <p className={`text-sm text-gray-500 ${canAdd ? 'mt-3' : ''}`}>No linked sources{canAdd ? ' yet — attach a photo if there\'s visual judgement behind this.' : '.'}</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {e.sources.map((s, i) => {
+            if (s.type === 'photo' && s.fileId) return <PhotoSource key={i} s={s} />
+            const Icon = SOURCE_ICON[s.type] || Link2
+            const inner = (
+              <div className="flex gap-3 rounded-xl p-3 ring-1 ring-gray-200 transition hover:bg-gray-50 dark:ring-gray-800 dark:hover:bg-gray-850">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-500 dark:bg-gray-800"><Icon size={16} /></span>
+                <div>
+                  <p className="text-sm font-medium">{s.title}</p>
+                  <p className="text-xs capitalize text-gray-500">{s.type} · {fmtDate(s.date)}</p>
+                  {s.excerpt && <p className="mt-1 text-sm italic text-gray-600 dark:text-gray-400">"{s.excerpt}"</p>}
+                </div>
+              </div>
+            )
+            return s.chatId ? <Link key={i} to={`/c/${s.chatId}`} className="block">{inner}</Link> : <div key={i}>{inner}</div>
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -765,7 +824,7 @@ export default function ExpertiseDetail() {
         ))}
 
         <section><H2 id="related" count={(e.related || []).length || null}>Related Expertise</H2><Related e={e} /></section>
-        <section><H2 id="sources" count={e.sources.length || null}>Sources</H2><Sources e={e} /></section>
+        <section><H2 id="sources" count={e.sources.length || null}>Sources</H2><Sources e={e} user={user} updateExpertise={updateExpertise} showToast={showToast} /></section>
         <section><H2 id="feedback" count={e.feedback.length || null}>Feedback</H2><Feedback e={e} /></section>
         <section><H2 id="history" count={e.versions.length || null}>Version history</H2><Versions e={e} /></section>
         <section><H2 id="activity">Activity</H2><Activity e={e} /></section>

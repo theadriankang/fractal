@@ -128,6 +128,9 @@ export function checkFile(file) {
   return null
 }
 
+/** URL that serves an upload's original bytes back (e.g. a photo attached as Expertise evidence). */
+export const fileUrl = (fileId) => `${API_BASE}/api/files/${fileId}/raw`
+
 /** POST /api/files: stores one attachment. Resolves to {id, name, size, kind, mediaType, chars, pages}. */
 export async function uploadFile(file) {
   const body = new FormData()

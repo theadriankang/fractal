@@ -116,6 +116,18 @@ def _load(file_id: str) -> tuple[dict, Path] | None:
         return None
 
 
+def raw_file(file_id: str) -> tuple[Path, str, str] | None:
+    """(path, media type, filename) for serving an upload's original bytes back
+    (e.g. an image attached to a chat message or captured as Expertise evidence),
+    or None if the id is unknown. Caller decides what to do with the result --
+    this doesn't restrict by kind, since any uploaded type may be worth linking to."""
+    found = _load(file_id)
+    if not found:
+        return None
+    meta, folder = found
+    return folder / "original", meta["mediaType"], meta["name"]
+
+
 def _clip(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text

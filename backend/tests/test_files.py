@@ -154,3 +154,18 @@ def test_files_on_earlier_turns_are_resent_and_unknown_ids_are_safe():
 def test_turns_without_files_are_unchanged():
     turns = [ChatTurn(role="assistant", content="stray"), ChatTurn(role="user", content="Hi")]
     assert to_model_messages(turns, native_files=True) == [{"role": "user", "content": "Hi"}]
+
+
+def test_raw_serves_the_uploaded_image_bytes_back():
+    data = b"\x89PNG fake image bytes, enough to round-trip"
+    meta = upload("chiller-corrosion.png", data).json()
+    res = client.get(f"/api/files/{meta['id']}/raw")
+    assert res.status_code == 200
+    assert res.content == data
+    assert res.headers["content-type"] == "image/png"
+    assert res.headers["content-disposition"].startswith("inline")
+
+
+def test_raw_404s_for_an_unknown_or_malformed_id():
+    assert client.get("/api/files/" + "0" * 32 + "/raw").status_code == 404
+    assert client.get("/api/files/not-a-real-id/raw").status_code == 404
