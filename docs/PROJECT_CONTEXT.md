@@ -46,7 +46,7 @@ Version-controlled (rollback) · Secure (role-based access) · Clearly bounded (
 /docs                 This file + build prompts
 ```
 
-Live URLs: frontend `https://fractal-delta.vercel.app`, backend `https://fractal-backend-422044745328.asia-southeast1.run.app` (health at `/api/health`).
+Live URLs: frontend `https://fractal-keppel.vercel.app`, backend `https://fractal-backend-422044745328.asia-southeast1.run.app` (health at `/api/health`).
 
 ## Architecture (decided)
 ```
@@ -54,7 +54,7 @@ Browser (React)
   ├── Supabase Auth  (login; JWT carries the user id)
   ├── Supabase       (simple reads that Row Level Security allows, e.g. listing Expertise)
   ├── Edge Function `meetings`  (Meeting Recorder insights + save — already built)
-  └── FastAPI on Tencent Cloud  (/api/*: chat streaming, Auto routing, Expertise retrieval,
+  └── FastAPI on Google Cloud Run  (/api/*: chat streaming, Auto routing, Expertise retrieval,
                                  extraction, review/approve/rollback, audit) ──► Supabase Postgres (+ pgvector)
 ```
 - **Supabase is the only database** (Postgres + pgvector + Auth + Edge Functions). No SQLite.

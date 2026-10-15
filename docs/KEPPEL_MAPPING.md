@@ -52,7 +52,7 @@ answer, grounded in the actual feature/file, not aspirational copy.
 | Demo Walkthrough | Live: chat → Expertise applied chip → 👎 correction → Review Queue → approve → version bump (matches Prompt 7's done-when check). |
 | Architecture / trust-boundary diagram + key design trade-offs | `docs/ARCHITECTURE.md` (this repo). |
 | Source Code via GitHub repo | `github.com/theadriankang/fractal`, `main` branch. |
-| Live deployment (bonus) | Front end: https://fractal-delta.vercel.app (Vercel, auto-deploys from `main`). Backend: https://fractal-backend-422044745328.asia-southeast1.run.app (Google Cloud Run, auto-redeploys from `main`; health at `/api/health`). Database/Auth/meetings Edge Function: Supabase. See `docs/DEPLOY.md`. |
+| Live deployment (bonus) | Front end: https://fractal-keppel.vercel.app (Vercel, auto-deploys from `main`). Backend: https://fractal-backend-422044745328.asia-southeast1.run.app (Google Cloud Run, auto-redeploys from `main`; health at `/api/health`). Database/Auth/meetings Edge Function: Supabase. See `docs/DEPLOY.md`. |
 
 ## Known limitations (said plainly, not hidden)
 - **Meeting Recorder transcription is browser-only today**: `backend/app/config.py`'s `TRANSCRIBE` flag (`browser` / `tencent-asr` / `whisper`) exists for a server-side transcription path, but only `browser` (the Web Speech API, client-side) is implemented — the other two are documented placeholders (see the flag's own TODO).

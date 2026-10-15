@@ -8,7 +8,7 @@ Built for the **Tencent Cloud AI CAN DO IT Hackathon 2026 — Real Estate Track 
 
 > Status: **live, deployed**. Frontend on Vercel, backend on Cloud Run — real model calls (Claude, GPT, Gemini, Grok, Hunyuan, DeepSeek), real retrieval-backed Expertise matching, and a Postgres-backed (Supabase) store. See [Architecture](#architecture) for the real API.
 >
-> - Frontend: https://fractal-delta.vercel.app
+> - Frontend: https://fractal-keppel.vercel.app
 > - Backend: https://fractal-backend-422044745328.asia-southeast1.run.app (health check at `/api/health`)
 
 ---
