@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Pencil, Save, Send, Check, Archive, Download, MessageSquarePlus, RotateCcw, GitCompare, FileText, MessagesSquare, Mic,
   Link2, ThumbsUp, ThumbsDown, Trash2, ChevronDown, ChevronLeft, ChevronRight, Copy, ShieldCheck, Info, AlertTriangle, Mail,
-  ClipboardList, Plus, X, RotateCw, GitPullRequestArrow, Eye, CornerDownRight,
+  ClipboardList, Plus, X, RotateCw, GitPullRequestArrow, Eye, CornerDownRight, CircleHelp,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { USE_MOCK, apiFor } from '../lib/api'
@@ -390,7 +390,7 @@ function Activity({ e }) {
   )
 }
 
-const SOURCE_ICON = { conversation: MessagesSquare, interview: Mic, meeting: Mic, document: FileText }
+const SOURCE_ICON = { conversation: MessagesSquare, interview: Mic, meeting: Mic, document: FileText, gap: CircleHelp }
 function Sources({ e }) {
   if (!e.sources.length) return <p className="mt-3 text-sm text-gray-500">No linked sources.</p>
   return (

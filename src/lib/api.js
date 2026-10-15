@@ -418,6 +418,13 @@ export function apiFor(user) {
     // Feedback loop: the Expertise's saved test questions (a 👍 on a live answer adds one).
     saveTestCases: (id, testCases) => call('PUT', `/expertise/${enc(id)}/test-cases`, { testCases }),
 
+    // Knowledge gaps (backend/app/gaps.py): questions approved Expertise couldn't answer.
+    logGap: (question, chatId) => call('POST', '/gaps', { question, chatId }),
+    listGaps: () => call('GET', '/gaps'),
+    linkGap: (id, expertiseId) => call('POST', `/gaps/${enc(id)}/link`, { expertiseId }),
+    recheckGap: (id) => call('POST', `/gaps/${enc(id)}/recheck`),
+    dismissGap: (id, reason = '') => call('POST', `/gaps/${enc(id)}/dismiss`, { reason }),
+
     listAudit: (params = {}) => {
       const qs = new URLSearchParams()
       if (params.targetId) qs.set('targetId', params.targetId)

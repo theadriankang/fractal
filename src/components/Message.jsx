@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ChartBlock from './ChartBlock'
 import {
-  Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, BookOpenCheck, FileText, Globe, X, Scale, Layers,
+  Copy, Check, RefreshCw, ThumbsUp, ThumbsDown, BookOpenCheck, FileText, Globe, X, Scale, Layers, CircleHelp,
 } from 'lucide-react'
 import { useStore } from '../store'
 import { ModelBadge } from './ModelSelector'
@@ -249,6 +249,22 @@ function WeighedSection({ msg }) {
   )
 }
 
+// Shown when nothing approved answered this question: it was logged as a knowledge gap
+// (backend/app/gaps.py), so the right experts see it in the Review Queue.
+function GapNote({ msg }) {
+  const gap = msg.responses[0]?.auto?.gap
+  if (!gap) return null
+  const who = gap.domain ? `${gap.domain} experts` : 'the experts'
+  return (
+    <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-gray-500 animate-fadeIn">
+      <CircleHelp size={12} className="text-amber-500" />
+      No approved Expertise covers this yet. Logged as a knowledge gap for {who}
+      {gap.askCount > 1 && <> (asked {gap.askCount}× by {gap.people} {gap.people === 1 ? 'person' : 'people'})</>}.
+      <Link to="/review?tab=gaps" className="underline hover:text-gray-800 dark:hover:text-gray-200">See gaps</Link>
+    </p>
+  )
+}
+
 export function AssistantMessage({ chatId, msg, readOnly = false }) {
   const compare = msg.responses.length > 1
   return (
@@ -257,6 +273,7 @@ export function AssistantMessage({ chatId, msg, readOnly = false }) {
         {msg.responses.map((_, i) => <ResponseCard key={i} chatId={chatId} msg={msg} idx={i} compare={compare} readOnly={readOnly} />)}
       </div>
       <WeighedSection msg={msg} />
+      <GapNote msg={msg} />
       {!readOnly && <CaptureCard key={msg.detection ? 'detected' : 'none'} chatId={chatId} msg={msg} />}
     </div>
   )

@@ -4,6 +4,7 @@ import { SEED_CHATS } from './data/chats'
 import { SEED_EXPERTISE, SEED_PROPOSALS, CONTENT_FIELDS } from './data/expertise'
 import { PORTFOLIO_EXPERTISE, PORTFOLIO_PROPOSALS } from './data/expertisePortfolio'
 import { migrateDemoState } from './data/demoMigration'
+import { TAXONOMY } from './data/taxonomy'
 import { PROVIDERS, routeAuto, routeAutoWithFallback, makeAvailabilityChecker, getModel } from './data/models'
 import { matchExpertise, buildReply, streamText, detectExpertise, suggestTitle } from './lib/mockApi'
 import { isLive, streamChat, extractKnowhow, USE_MOCK, apiFor, fromApiChat, matchExpertiseBackend, routeAutoBackend, refreshLiveModels, getModelAvailability, weighExpertise, proposeFix, runChangeTest } from './lib/api'
@@ -219,6 +220,29 @@ function checkForConflict(get, chatId, msgId, question, attachedIds) {
 }
 
 // Per-provider enable/disable only — API keys live server-side (backend/.env), never in the browser.
+// Knowledge gaps. Mirrors GAP_WEAK_SCORE in backend/app/config.py: below it (or with no match at
+// all) the question is reported to POST /api/gaps, which re-checks it and decides. Only questions
+// Fractal answered without attached Expertise, on the live backend, are reported.
+const GAP_WEAK_SCORE = 0.5
+
+function reportGap(get, set, chatId, msgId, question) {
+  apiFor(get().user).logGap(question, chatId)
+    .then((res) => {
+      if (!res?.gap) return
+      set((s) => ({ gaps: [res.gap, ...s.gaps.filter((g) => g.id !== res.gap.id)] }))
+      if (!res.logged) return
+      const { id, domain, askCount, askers } = res.gap
+      get().patchMessage(chatId, msgId, (m) => ({
+        ...m,
+        responses: m.responses.map((r, i) => (i === 0
+          ? { ...r, auto: { ...(r.auto || {}), gap: { id, domain, askCount, people: askers.length, outcome: res.outcome } } }
+          : r)),
+      }))
+      if (!streams.has(msgId)) saveMessage(get, chatId, msgId)
+    })
+    .catch(() => {}) // a missed gap must never disturb the answer
+}
+
 const defaultConnections = Object.fromEntries(
   PROVIDERS.map((p) => [p.id, { enabled: true }]),
 )
@@ -250,6 +274,7 @@ export const useStore = create(
       // ---------------- ui (not persisted) ----------------
       // 'supabase' once chats/expertise/proposals have loaded from the backend; 'local' = this browser only.
       dataSource: 'local',
+      gaps: [], // knowledge gaps, loaded by the Review Queue's "Knowledge gaps" tab
       sidebarOpen: true,
       settingsOpen: false,
       settingsTab: 'general',
@@ -497,8 +522,10 @@ export const useStore = create(
         // Backend returns [] when nothing is relevant → stay empty (attached still included).
         const byId = Object.fromEntries(expertise.map((e) => [e.id, e]))
         let matched
+        let unanswered = false // no approved match, or only a weak one → maybe a knowledge gap
         if (settings.autoApply) {
           const backendResults = await matchExpertiseBackend(text, attachedExpertise, 2)
+          unanswered = backendResults !== null && !attachedExpertise.length && !(backendResults[0]?.score >= GAP_WEAK_SCORE)
           if (backendResults === null) {
             // Backend offline or mock mode → local keyword fallback.
             matched = matchExpertise(text, expertise, attachedExpertise, settings.autoApply)
@@ -565,6 +592,7 @@ export const useStore = create(
         streams.set(asstMsg.id, cancels)
         // Runs beside the answer: weighing only appears if this question needs it.
         if (settings.autoApply) checkForConflict(get, chatId, asstMsg.id, text, attachedExpertise)
+        if (unanswered && get().dataSource === 'supabase') reportGap(get, set, chatId, asstMsg.id, text)
       },
 
       stopGeneration: (chatId) => {
@@ -822,6 +850,50 @@ export const useStore = create(
         get().patchMessage(chatId, msgId, (m) => ({ ...m, detectionState: 'saved', detectionResult: result.id, detectionMissing: result.missing }))
         saveMessage(get, chatId, msgId)
         return result
+      },
+
+      // ---------------- knowledge gaps ----------------
+      loadGaps: async () => {
+        if (get().dataSource !== 'supabase') return
+        try {
+          set({ gaps: await apiFor(get().user).listGaps() })
+        } catch (err) {
+          get().showToast(`Couldn't load knowledge gaps — ${err.message}`)
+        }
+      },
+      // Starts a draft Expertise from the gap, pre-filled with the question, and links them so
+      // approving the draft resolves the gap. Returns the new Expertise id (to open it for editing).
+      captureGap: (gap) => {
+        const user = get().user
+        const domain = gap.domain && user.domains.includes(gap.domain) ? gap.domain : user.domains[0]
+        const topic = TAXONOMY.find((d) => d.domain === domain)?.topics[0] || ''
+        const name = gap.question.replace(/[?.!]+$/, '').slice(0, 70)
+        const id = get().createExpertise({
+          name, domain, topic,
+          whenToUse: gap.question,
+          summary: '',
+          sources: [{ type: 'gap', title: `Knowledge gap — asked ${gap.askCount}× by ${gap.askers.length} ${gap.askers.length === 1 ? 'person' : 'people'}`, excerpt: gap.question, date: now() }],
+        })
+        set((s) => ({ gaps: s.gaps.map((g) => (g.id === gap.id ? { ...g, status: 'drafting', expertiseId: id, domain } : g)) }))
+        sync(get, 'the knowledge gap', (api) => api.linkGap(gap.id, id), (g) => set((s) => ({ gaps: s.gaps.map((x) => (x.id === g.id ? g : x)) })))
+        return id
+      },
+      recheckGap: async (id) => {
+        try {
+          const g = await apiFor(get().user).recheckGap(id)
+          set((s) => ({ gaps: s.gaps.map((x) => (x.id === g.id ? g : x)) }))
+          get().showToast(g.status === 'resolved' ? `Covered now: ${g.resolution}` : 'Still not covered by approved Expertise.')
+        } catch (err) {
+          get().showToast(`Couldn't re-check — ${err.message}`)
+        }
+      },
+      dismissGap: async (id, reason = '') => {
+        try {
+          const g = await apiFor(get().user).dismissGap(id, reason)
+          set((s) => ({ gaps: s.gaps.map((x) => (x.id === g.id ? g : x)) }))
+        } catch (err) {
+          get().showToast(`Couldn't dismiss — ${err.message}`)
+        }
       },
 
       // ---------------- expertise CRUD + governance ----------------

@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Check, X, Sparkles, GitPullRequestArrow, FileEdit, ShieldCheck, Lock, MessageSquare, Mic, Quote, AlertTriangle } from 'lucide-react'
 import { canEdit, contributeBlock, reviewBlock, isReviewer, isIntern } from '../lib/permissions'
 import { readiness } from '../lib/readiness'
@@ -9,6 +9,7 @@ import { Breadcrumb } from './ExpertiseLayout'
 import { StatusBadge, timeAgo } from '../components/ui'
 import { decisionStepText } from '../lib/decisionLogic'
 import { ChangeExtras, ChangeTest, CorrectionInfo, NeedsAttention, testBroke } from '../components/FeedbackLoop'
+import KnowledgeGaps from '../components/KnowledgeGaps'
 
 // Where a captured item came from: the expert's own words + the extractor's confidence.
 function Provenance({ sources, capture }) {
@@ -158,6 +159,9 @@ function DraftCard({ e }) {
 
 export default function ReviewQueue() {
   const state = useStore()
+  const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') === 'gaps' ? 'gaps' : 'approvals'
+  const openGaps = state.gaps.filter((g) => g.status === 'open').length
   if (isIntern(state.user))
     return (
       <div className="mx-auto max-w-xl px-8 pt-24 text-center">
@@ -186,6 +190,21 @@ export default function ReviewQueue() {
           <p className="mt-1 max-w-2xl text-sm text-gray-500">
             Nothing reaches operational use without a human. New Expertise and every change to an existing one — from experts, corrections or 👎 feedback — waits here for a Reviewer.
           </p>
+          <div className="mt-5 flex gap-1 border-b border-gray-200 dark:border-gray-800" role="tablist">
+            {[['approvals', 'Approvals'], ['gaps', 'Knowledge gaps']].map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={tab === id}
+                onClick={() => setParams(id === 'gaps' ? { tab: 'gaps' } : {})}
+                className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition ${tab === id ? 'border-accent-500 text-gray-900 dark:text-gray-100' : 'border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+              >
+                {label}
+                {id === 'gaps' && openGaps > 0 && <span className="rounded-full bg-amber-500/15 px-1.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">{openGaps}</span>}
+              </button>
+            ))}
+          </div>
+          {tab === 'gaps' ? <KnowledgeGaps /> : <>
           <ScopeNotice />
           <NeedsAttention />
           <Group title="Awaiting approval" desc="Submitted Expertise ready for a reviewer's decision." n={inReview.length}>
@@ -197,6 +216,7 @@ export default function ReviewQueue() {
           <Group title="Drafts" desc="Captured or started, but not yet submitted. Only experts in the draft's domain can complete and submit it." n={drafts.length}>
             {drafts.map((e) => <DraftCard key={e.id} e={e} />)}
           </Group>
+          </>}
         </div>
       </div>
     </div>
