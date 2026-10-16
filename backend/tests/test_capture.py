@@ -49,6 +49,16 @@ NEW_LIFT = {
 }
 
 
+def test_prompt_encodes_candidates_with_structured_decision_steps():
+    # Regression: DecisionStep objects in a candidate made json.dumps raise, so /extract returned 500
+    # whenever the chat had related Expertise.
+    lift = {"id": "exp-lift-door", "name": "Repeated Lift Door Reopening", "domain": "Technical Services",
+            "decisionLogic": [{"text": "Check for entrapment first.", "condition": "", "action": ""}, "Review fault history."]}
+    prompt = extract.build_prompt(req(candidates=(CHILLER, lift)))
+    assert '"decisionLogic": [{"text": "Check for entrapment first."' in prompt
+    assert "Review fault history." in prompt
+
+
 def test_grounding():
     assert grounded("it’s dust on the contacts", LIFT_MSG)  # curly apostrophe still matches
     assert grounded("we check door lock contacts first", LIFT_MSG)  # minor omission

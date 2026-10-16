@@ -85,11 +85,8 @@ Always respond by calling the record_knowhow tool."""
 
 def build_prompt(req: ExtractRequest) -> str:
     taxonomy = {t.domain: t.topics for t in req.taxonomy}
-    existing = [
-        {"id": e.id, "name": e.name, "domain": e.domain, "topic": e.topic, "summary": e.summary,
-         **{f: getattr(e, f) for f in FIELDS}}
-        for e in req.candidates
-    ]
+    # model_dump, not getattr: decisionLogic holds DecisionStep models, which json.dumps can't encode.
+    existing = [e.model_dump(include={"id", "name", "domain", "topic", "summary", *FIELDS}) for e in req.candidates]
     convo = "\n".join(f"{t.role.upper()}: {t.content}" for t in req.turns)
     return (
         f"<taxonomy>\n{json.dumps(taxonomy, ensure_ascii=False)}\n</taxonomy>\n\n"
